@@ -499,6 +499,23 @@ func (conf *ServerConfig) loadUpstreams() (upstreams []string, err error) {
 	return stringutil.FilterOut(upstreams, aghnet.IsCommentOrEmpty), nil
 }
 
+func (s *Server) loadManagedUpstreams() (upstreams []string, err error) {
+	if s.dnsFilter == nil {
+		return nil, nil
+	}
+
+	upstreams, err = s.dnsFilter.GetUpstreamDNSFiles()
+	if err != nil {
+		return nil, fmt.Errorf("loading managed upstream dns files: %w", err)
+	}
+
+	if len(upstreams) > 0 {
+		log.Debug("dnsforward: got %d upstreams from managed files", len(upstreams))
+	}
+
+	return upstreams, nil
+}
+
 // collectListenAddr adds addrPort to addrs.  It also adds its port to
 // unspecPorts if its address is unspecified.
 func collectListenAddr(

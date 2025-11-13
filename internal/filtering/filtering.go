@@ -150,6 +150,10 @@ type Config struct {
 	// UserRules is the global list of custom rules.
 	UserRules []string `yaml:"-"`
 
+	// UpstreamDNSFiles is the list of upstream DNS files to be downloaded and
+	// managed similarly to filter lists.
+	UpstreamDNSFiles []FilterYAML `yaml:"-"`
+
 	// SafeFSPatterns are the patterns for matching which local filtering-rule
 	// files can be added.
 	SafeFSPatterns []string `yaml:"safe_fs_patterns"`
@@ -344,6 +348,7 @@ func (d *DNSFilter) WriteDiskConfig(c *Config) {
 	c.Filters = slices.Clone(d.conf.Filters)
 	c.WhitelistFilters = slices.Clone(d.conf.WhitelistFilters)
 	c.UserRules = slices.Clone(d.conf.UserRules)
+	c.UpstreamDNSFiles = slices.Clone(d.conf.UpstreamDNSFiles)
 }
 
 // setFilters sets new filters, synchronously or asynchronously.  When filters
@@ -1038,14 +1043,30 @@ func New(c *Config, blockFilters []Filter) (d *DNSFilter, err error) {
 		return nil, fmt.Errorf("making filtering directory: %w", err)
 	}
 
+	// Create upstream DNS files directory
+	err = os.MkdirAll(filepath.Join(d.conf.DataDir, "upstream_dns_files"), aghos.DefaultPermDir)
+	if err != nil {
+		d.Close()
+
+		return nil, fmt.Errorf("making upstream dns directory: %w", err)
+	}
+
 	d.loadFilters(ctx, d.conf.Filters)
 	d.loadFilters(ctx, d.conf.WhitelistFilters)
 
+	// Mark upstream DNS files before loading
+	for i := range d.conf.UpstreamDNSFiles {
+		d.conf.UpstreamDNSFiles[i].isUpstream = true
+	}
+	d.loadFilters(ctx, d.conf.UpstreamDNSFiles)
+
 	d.conf.Filters = deduplicateFilters(d.conf.Filters)
 	d.conf.WhitelistFilters = deduplicateFilters(d.conf.WhitelistFilters)
+	d.conf.UpstreamDNSFiles = deduplicateFilters(d.conf.UpstreamDNSFiles)
 
 	d.idGen.fix(d.conf.Filters)
 	d.idGen.fix(d.conf.WhitelistFilters)
+	d.idGen.fix(d.conf.UpstreamDNSFiles)
 
 	return d, nil
 }
@@ -1072,6 +1093,7 @@ func (d *DNSFilter) Start() {
 	d.done = make(chan struct{}, 1)
 
 	d.RegisterFilteringHandlers()
+	d.RegisterUpstreamDNSHandlers()
 
 	go d.updatesLoop(context.TODO())
 }
@@ -1114,6 +1136,9 @@ func (d *DNSFilter) periodicallyRefreshFilters(ivl time.Duration) (nextIvl time.
 
 	isNetErr, ok := false, false
 	_, isNetErr, ok = d.tryRefreshFilters(true, true, false)
+
+	// Also update upstream DNS files
+	d.updateUpstreamDNSFilesInLoop()
 
 	if ok && !isNetErr {
 		ivl = maxInterval
