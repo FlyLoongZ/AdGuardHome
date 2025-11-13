@@ -550,6 +550,14 @@ func (s *Server) prepareUpstreamSettings(boot upstream.Resolver) (err error) {
 		return fmt.Errorf("loading upstreams: %w", err)
 	}
 
+	// Load from managed upstream DNS files
+	var managedUpstreams []string
+	managedUpstreams, err = s.loadManagedUpstreams()
+	if err != nil {
+		return fmt.Errorf("loading managed upstreams: %w", err)
+	}
+	upstreams = append(upstreams, managedUpstreams...)
+
 	uc, err := newUpstreamConfig(upstreams, defaultDNS, &upstream.Options{
 		Logger:       aghslog.NewForUpstream(s.baseLogger, aghslog.UpstreamTypeMain),
 		Bootstrap:    boot,

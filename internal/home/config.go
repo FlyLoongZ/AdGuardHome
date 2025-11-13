@@ -149,6 +149,9 @@ type configuration struct {
 	WhitelistFilters []filtering.FilterYAML `yaml:"whitelist_filters"`
 	UserRules        []string               `yaml:"user_rules"`
 
+	// UpstreamDNSFiles is the list of upstream DNS files similar to filters
+	UpstreamDNSFiles []filtering.FilterYAML `yaml:"upstream_dns_files"`
+
 	DHCP      *dhcpd.ServerConfig `yaml:"dhcp"`
 	Filtering *filtering.Config   `yaml:"filtering"`
 
@@ -882,6 +885,7 @@ func (c *configuration) write(
 		config.Filters = config.Filtering.Filters
 		config.WhitelistFilters = config.Filtering.WhitelistFilters
 		config.UserRules = config.Filtering.UserRules
+		config.UpstreamDNSFiles = config.Filtering.UpstreamDNSFiles
 	}
 
 	if s := globalContext.dnsServer; s != nil {

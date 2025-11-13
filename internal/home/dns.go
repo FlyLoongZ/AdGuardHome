@@ -100,6 +100,9 @@ func initDNS(
 		return fmt.Errorf("init querylog: %w", err)
 	}
 
+	// Set UpstreamDNSFiles from config
+	config.Filtering.UpstreamDNSFiles = config.UpstreamDNSFiles
+
 	globalContext.filters, err = filtering.New(config.Filtering, nil)
 	if err != nil {
 		// Don't wrap the error, since it's informative enough as is.

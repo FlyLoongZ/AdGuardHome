@@ -37,6 +37,7 @@ type FilterYAML struct {
 	LastUpdated time.Time `yaml:"-"`
 	checksum    uint32    // checksum of the file data
 	white       bool
+	isUpstream  bool // true if this is an upstream DNS file
 
 	Filter `yaml:",inline"`
 }
@@ -49,9 +50,13 @@ func (filter *FilterYAML) unload() {
 
 // Path to the filter contents
 func (filter *FilterYAML) Path(dataDir string) string {
+	dir := filterDir
+	if filter.isUpstream {
+		dir = "upstream_dns_files"
+	}
 	return filepath.Join(
 		dataDir,
-		filterDir,
+		dir,
 		strconv.FormatUint(uint64(filter.ID), 10)+".txt",
 	)
 }
