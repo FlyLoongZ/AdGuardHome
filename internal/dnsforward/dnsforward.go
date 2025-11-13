@@ -552,7 +552,7 @@ func (s *Server) prepareUpstreamSettings(boot upstream.Resolver) (err error) {
 
 	// Load from managed upstream DNS files
 	var managedUpstreams []string
-	managedUpstreams, err = s.loadManagedUpstreams()
+	managedUpstreams, err = s.loadManagedUpstreams(ctx, s.logger)
 	if err != nil {
 		return fmt.Errorf("loading managed upstreams: %w", err)
 	}

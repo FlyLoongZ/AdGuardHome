@@ -499,7 +499,10 @@ func (conf *ServerConfig) loadUpstreams() (upstreams []string, err error) {
 	return stringutil.FilterOut(upstreams, aghnet.IsCommentOrEmpty), nil
 }
 
-func (s *Server) loadManagedUpstreams() (upstreams []string, err error) {
+func (s *Server) loadManagedUpstreams(
+	ctx context.Context,
+	l *slog.Logger,
+) (upstreams []string, err error) {
 	if s.dnsFilter == nil {
 		return nil, nil
 	}
@@ -510,7 +513,7 @@ func (s *Server) loadManagedUpstreams() (upstreams []string, err error) {
 	}
 
 	if len(upstreams) > 0 {
-		log.Debug("dnsforward: got %d upstreams from managed files", len(upstreams))
+		l.DebugContext(ctx, "got upstreams from managed files", "number", len(upstreams))
 	}
 
 	return upstreams, nil
