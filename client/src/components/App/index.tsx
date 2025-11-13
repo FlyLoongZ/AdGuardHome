@@ -37,6 +37,7 @@ import Encryption from '../../containers/Encryption';
 import Dhcp from '../Settings/Dhcp';
 import Clients from '../../containers/Clients';
 import DnsBlocklist from '../../containers/DnsBlocklist';
+import DnsUpstream from '../../containers/DnsUpstream';
 import DnsAllowlist from '../../containers/DnsAllowlist';
 import DnsRewrites from '../../containers/DnsRewrites';
 import CustomRules from '../../containers/CustomRules';
@@ -84,6 +85,10 @@ const ROUTES = [
     {
         path: FILTERS_URLS.dns_blocklists,
         component: DnsBlocklist,
+    },
+    {
+        path: FILTERS_URLS.dns_upstream,
+        component: DnsUpstream,
     },
     {
         path: FILTERS_URLS.dns_allowlists,
