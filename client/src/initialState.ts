@@ -354,6 +354,14 @@ export type FilteringData = {
     modalType: string;
     modalFilterUrl: string;
     check: any;
+    
+    // Upstream DNS files management
+    upstreamDNSFiles: Filter[];
+    processingUpstreamDNSFiles: boolean;
+    processingAddUpstreamDNSFile: boolean;
+    processingRemoveUpstreamDNSFile: boolean;
+    processingConfigUpstreamDNSFile: boolean;
+    processingRefreshUpstreamDNSFiles: boolean;
 };
 
 export type QueryLogsData = {
@@ -558,6 +566,14 @@ export const initialState: RootState = {
         modalType: '',
         modalFilterUrl: '',
         check: {},
+        
+        // Upstream DNS files management
+        upstreamDNSFiles: [],
+        processingUpstreamDNSFiles: false,
+        processingAddUpstreamDNSFile: false,
+        processingRemoveUpstreamDNSFile: false,
+        processingConfigUpstreamDNSFile: false,
+        processingRefreshUpstreamDNSFiles: false,
     },
     queryLogs: {
         processingGetLogs: true,

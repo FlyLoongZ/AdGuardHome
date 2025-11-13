@@ -177,7 +177,7 @@ export const normalizeFilters = (filters: any) =>
         : [];
 
 export const normalizeFilteringStatus = (filteringStatus: any) => {
-    const { enabled, filters, user_rules: userRules, interval, whitelist_filters } = filteringStatus;
+    const { enabled, filters, user_rules: userRules, interval, whitelist_filters, files } = filteringStatus;
     const newUserRules = Array.isArray(userRules) ? userRules.join('\n') : '';
 
     return {
@@ -185,6 +185,17 @@ export const normalizeFilteringStatus = (filteringStatus: any) => {
         userRules: newUserRules,
         filters: normalizeFilters(filters),
         whitelistFilters: normalizeFilters(whitelist_filters),
+        upstreamDNSFiles: normalizeFilters(files),
+        interval,
+    };
+};
+
+// Special normalization function for upstream DNS files
+export const normalizeUpstreamDNSFilesStatus = (upstreamStatus: any) => {
+    const { files, interval } = upstreamStatus;
+    
+    return {
+        upstreamDNSFiles: normalizeFilters(files),
         interval,
     };
 };

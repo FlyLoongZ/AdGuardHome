@@ -2,7 +2,7 @@ import { createAction } from 'redux-actions';
 import { showLoading, hideLoading } from 'react-redux-loading-bar';
 import i18next from 'i18next';
 
-import { normalizeFilteringStatus, normalizeRulesTextarea } from '../helpers/helpers';
+import { normalizeFilteringStatus, normalizeUpstreamDNSFilesStatus, normalizeRulesTextarea } from '../helpers/helpers';
 import apiClient from '../api/Api';
 import { addErrorToast, addSuccessToast } from './toasts';
 
@@ -203,5 +203,133 @@ export const checkHost = (host: any) => async (dispatch: any) => {
     } catch (error) {
         dispatch(addErrorToast({ error }));
         dispatch(checkHostFailure());
+    }
+};
+
+// Upstream DNS Files Actions
+
+export const getUpstreamDNSFilesStatusRequest = createAction('GET_UPSTREAM_DNS_FILES_STATUS_REQUEST');
+export const getUpstreamDNSFilesStatusFailure = createAction('GET_UPSTREAM_DNS_FILES_STATUS_FAILURE');
+export const getUpstreamDNSFilesStatusSuccess = createAction('GET_UPSTREAM_DNS_FILES_STATUS_SUCCESS');
+
+export const getUpstreamDNSFilesStatus = () => async (dispatch: any) => {
+    dispatch(getUpstreamDNSFilesStatusRequest());
+    try {
+        const status = await apiClient.getUpstreamDNSFilesStatus();
+        dispatch(getUpstreamDNSFilesStatusSuccess({ ...normalizeUpstreamDNSFilesStatus(status) }));
+    } catch (error) {
+        dispatch(addErrorToast({ error }));
+        dispatch(getUpstreamDNSFilesStatusFailure());
+    }
+};
+
+export const addUpstreamDNSFileRequest = createAction('ADD_UPSTREAM_DNS_FILE_REQUEST');
+export const addUpstreamDNSFileFailure = createAction('ADD_UPSTREAM_DNS_FILE_FAILURE');
+export const addUpstreamDNSFileSuccess = createAction('ADD_UPSTREAM_DNS_FILE_SUCCESS');
+
+export const addUpstreamDNSFile =
+    (url: any, name: any) =>
+    async (dispatch: any, getState: any) => {
+        dispatch(addUpstreamDNSFileRequest());
+        try {
+            await apiClient.addUpstreamDNSFile({ url, name });
+            dispatch(addUpstreamDNSFileSuccess(url));
+            if (getState().filtering.isModalOpen) {
+                dispatch(toggleFilteringModal());
+            }
+            dispatch(addSuccessToast('upstream_dns_file_added_successfully'));
+            dispatch(getUpstreamDNSFilesStatus());
+        } catch (error) {
+            dispatch(addErrorToast({ error }));
+            dispatch(addUpstreamDNSFileFailure());
+        }
+    };
+
+export const removeUpstreamDNSFileRequest = createAction('REMOVE_UPSTREAM_DNS_FILE_REQUEST');
+export const removeUpstreamDNSFileFailure = createAction('REMOVE_UPSTREAM_DNS_FILE_FAILURE');
+export const removeUpstreamDNSFileSuccess = createAction('REMOVE_UPSTREAM_DNS_FILE_SUCCESS');
+
+export const removeUpstreamDNSFile =
+    (url: any) =>
+    async (dispatch: any, getState: any) => {
+        dispatch(removeUpstreamDNSFileRequest());
+        try {
+            await apiClient.removeUpstreamDNSFile({ url });
+            dispatch(removeUpstreamDNSFileSuccess(url));
+            if (getState().filtering.isModalOpen) {
+                dispatch(toggleFilteringModal());
+            }
+            dispatch(addSuccessToast('upstream_dns_file_removed_successfully'));
+            dispatch(getUpstreamDNSFilesStatus());
+        } catch (error) {
+            dispatch(addErrorToast({ error }));
+            dispatch(removeUpstreamDNSFileFailure());
+        }
+    };
+
+export const toggleUpstreamDNSFileRequest = createAction('UPSTREAM_DNS_FILE_TOGGLE_REQUEST');
+export const toggleUpstreamDNSFileFailure = createAction('UPSTREAM_DNS_FILE_TOGGLE_FAILURE');
+export const toggleUpstreamDNSFileSuccess = createAction('UPSTREAM_DNS_FILE_TOGGLE_SUCCESS');
+
+export const toggleUpstreamDNSFileStatus =
+    (url: any, data: any) =>
+    async (dispatch: any) => {
+        dispatch(toggleUpstreamDNSFileRequest());
+        try {
+            await apiClient.setUpstreamDNSFile({ url, data });
+            dispatch(toggleUpstreamDNSFileSuccess(url));
+            dispatch(getUpstreamDNSFilesStatus());
+        } catch (error) {
+            dispatch(addErrorToast({ error }));
+            dispatch(toggleUpstreamDNSFileFailure());
+        }
+    };
+
+export const editUpstreamDNSFileRequest = createAction('EDIT_UPSTREAM_DNS_FILE_REQUEST');
+export const editUpstreamDNSFileFailure = createAction('EDIT_UPSTREAM_DNS_FILE_FAILURE');
+export const editUpstreamDNSFileSuccess = createAction('EDIT_UPSTREAM_DNS_FILE_SUCCESS');
+
+export const editUpstreamDNSFile =
+    (url: any, data: any) =>
+    async (dispatch: any, getState: any) => {
+        dispatch(editUpstreamDNSFileRequest());
+        try {
+            await apiClient.setUpstreamDNSFile({ url, data });
+            dispatch(editUpstreamDNSFileSuccess(url));
+            if (getState().filtering.isModalOpen) {
+                dispatch(toggleFilteringModal());
+            }
+            dispatch(addSuccessToast('upstream_dns_file_updated'));
+            dispatch(getUpstreamDNSFilesStatus());
+        } catch (error) {
+            dispatch(addErrorToast({ error }));
+            dispatch(editUpstreamDNSFileFailure());
+        }
+    };
+
+export const refreshUpstreamDNSFilesRequest = createAction('UPSTREAM_DNS_FILES_REFRESH_REQUEST');
+export const refreshUpstreamDNSFilesFailure = createAction('UPSTREAM_DNS_FILES_REFRESH_FAILURE');
+export const refreshUpstreamDNSFilesSuccess = createAction('UPSTREAM_DNS_FILES_REFRESH_SUCCESS');
+
+export const refreshUpstreamDNSFiles = () => async (dispatch: any) => {
+    dispatch(refreshUpstreamDNSFilesRequest());
+    dispatch(showLoading());
+    try {
+        const data = await apiClient.refreshUpstreamDNSFiles();
+        const { updated } = data;
+        dispatch(refreshUpstreamDNSFilesSuccess());
+
+        if (updated > 0) {
+            dispatch(addSuccessToast(i18next.t('upstream_dns_files_updated', { count: updated })));
+        } else {
+            dispatch(addSuccessToast('upstream_dns_files_up_to_date_toast'));
+        }
+
+        dispatch(getUpstreamDNSFilesStatus());
+        dispatch(hideLoading());
+    } catch (error) {
+        dispatch(addErrorToast({ error }));
+        dispatch(refreshUpstreamDNSFilesFailure());
+        dispatch(hideLoading());
     }
 };

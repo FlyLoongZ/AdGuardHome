@@ -155,6 +155,7 @@ export const FILTERS_URLS = {
     dns_rewrites: '/dns_rewrites',
     custom_rules: '/custom_rules',
     blocked_services: '/blocked_services',
+    dns_upstream: '/dns_upstream',
 };
 
 export const ENCRYPTION_SOURCE = {

@@ -152,6 +152,89 @@ const filtering = handleActions(
             check: payload,
             processingCheck: false,
         }),
+
+        // Upstream DNS Files actions
+        [actions.getUpstreamDNSFilesStatusRequest.toString()]: (state: any) => ({
+            ...state,
+            processingUpstreamDNSFiles: true,
+        }),
+        [actions.getUpstreamDNSFilesStatusFailure.toString()]: (state: any) => ({
+            ...state,
+            processingUpstreamDNSFiles: false,
+        }),
+        [actions.getUpstreamDNSFilesStatusSuccess.toString()]: (state, { payload }: any) => ({
+            ...state,
+            upstreamDNSFiles: payload.upstreamDNSFiles || [],
+            processingUpstreamDNSFiles: false,
+        }),
+
+        [actions.addUpstreamDNSFileRequest.toString()]: (state: any) => ({
+            ...state,
+            processingAddUpstreamDNSFile: true,
+            isFilterAdded: false,
+        }),
+        [actions.addUpstreamDNSFileFailure.toString()]: (state: any) => ({
+            ...state,
+            processingAddUpstreamDNSFile: false,
+            isFilterAdded: false,
+        }),
+        [actions.addUpstreamDNSFileSuccess.toString()]: (state: any) => ({
+            ...state,
+            processingAddUpstreamDNSFile: false,
+            isFilterAdded: true,
+        }),
+
+        [actions.removeUpstreamDNSFileRequest.toString()]: (state: any) => ({
+            ...state,
+            processingRemoveUpstreamDNSFile: true,
+        }),
+        [actions.removeUpstreamDNSFileFailure.toString()]: (state: any) => ({
+            ...state,
+            processingRemoveUpstreamDNSFile: false,
+        }),
+        [actions.removeUpstreamDNSFileSuccess.toString()]: (state: any) => ({
+            ...state,
+            processingRemoveUpstreamDNSFile: false,
+        }),
+
+        [actions.toggleUpstreamDNSFileRequest.toString()]: (state: any) => ({
+            ...state,
+            processingConfigUpstreamDNSFile: true,
+        }),
+        [actions.toggleUpstreamDNSFileFailure.toString()]: (state: any) => ({
+            ...state,
+            processingConfigUpstreamDNSFile: false,
+        }),
+        [actions.toggleUpstreamDNSFileSuccess.toString()]: (state: any) => ({
+            ...state,
+            processingConfigUpstreamDNSFile: false,
+        }),
+
+        [actions.editUpstreamDNSFileRequest.toString()]: (state: any) => ({
+            ...state,
+            processingConfigUpstreamDNSFile: true,
+        }),
+        [actions.editUpstreamDNSFileFailure.toString()]: (state: any) => ({
+            ...state,
+            processingConfigUpstreamDNSFile: false,
+        }),
+        [actions.editUpstreamDNSFileSuccess.toString()]: (state: any) => ({
+            ...state,
+            processingConfigUpstreamDNSFile: false,
+        }),
+
+        [actions.refreshUpstreamDNSFilesRequest.toString()]: (state: any) => ({
+            ...state,
+            processingRefreshUpstreamDNSFiles: true,
+        }),
+        [actions.refreshUpstreamDNSFilesFailure.toString()]: (state: any) => ({
+            ...state,
+            processingRefreshUpstreamDNSFiles: false,
+        }),
+        [actions.refreshUpstreamDNSFilesSuccess.toString()]: (state: any) => ({
+            ...state,
+            processingRefreshUpstreamDNSFiles: false,
+        }),
     },
     {
         isModalOpen: false,
@@ -172,6 +255,13 @@ const filtering = handleActions(
         modalType: '',
         modalFilterUrl: '',
         check: {},
+        // Upstream DNS Files state
+        upstreamDNSFiles: [],
+        processingUpstreamDNSFiles: false,
+        processingAddUpstreamDNSFile: false,
+        processingRemoveUpstreamDNSFile: false,
+        processingConfigUpstreamDNSFile: false,
+        processingRefreshUpstreamDNSFiles: false,
     },
 );
 

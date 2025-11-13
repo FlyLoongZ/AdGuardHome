@@ -758,5 +758,17 @@
     "saturday_short": "Sat",
     "upstream_dns_cache_configuration": "Upstream DNS cache configuration",
     "enable_upstream_dns_cache": "Enable DNS caching for this client's custom upstream configuration",
-    "dns_cache_size": "DNS cache size, in bytes"
+    "dns_cache_size": "DNS cache size, in bytes",
+    "dns_upstream_files": "DNS Split",
+    "dns_upstream_files_desc": "DNS split configuration and rule management",
+    "dns_upstream_files_hint": "DNS split rule management, configure upstream servers for specific domains",
+    "dns_splitter_files": "DNS Splitter Files",
+    "dns_splitter_files_desc": "Manage DNS splitter rule files",
+    "dns_splitter_files_hint": "DNS splitter rule file management, provide download functionality similar to ad filter rules",
+    "add_upstream_dns_file": "Add Rule",
+    "upstream_dns_file_added_successfully": "DNS splitter rule added successfully",
+    "upstream_dns_file_removed_successfully": "DNS splitter rule removed successfully",
+    "upstream_dns_file_updated": "DNS splitter rule updated successfully",
+    "upstream_dns_files_updated": "{{count}} DNS splitter rules updated",
+    "upstream_dns_files_up_to_date_toast": "All DNS splitter rules are up to date"
 }

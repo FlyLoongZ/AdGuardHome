@@ -100,6 +100,17 @@ class Api {
 
     FILTERING_CHECK_HOST = { path: 'filtering/check_host', method: 'GET' };
 
+    // Upstream DNS Files
+    UPSTREAM_DNS_STATUS = { path: 'upstream_dns/status', method: 'GET' };
+
+    UPSTREAM_DNS_ADD = { path: 'upstream_dns/add_url', method: 'POST' };
+
+    UPSTREAM_DNS_REMOVE = { path: 'upstream_dns/remove_url', method: 'POST' };
+
+    UPSTREAM_DNS_SET = { path: 'upstream_dns/set_url', method: 'POST' };
+
+    UPSTREAM_DNS_REFRESH = { path: 'upstream_dns/refresh', method: 'POST' };
+
     getFilteringStatus() {
         const { path, method } = this.FILTERING_STATUS;
 
@@ -162,6 +173,46 @@ class Api {
         const url = getPathWithQueryString(path, params);
 
         return this.makeRequest(url, method);
+    }
+
+    // Upstream DNS Files methods
+    getUpstreamDNSFilesStatus() {
+        const { path, method } = this.UPSTREAM_DNS_STATUS;
+
+        return this.makeRequest(path, method);
+    }
+
+    addUpstreamDNSFile(config: any) {
+        const { path, method } = this.UPSTREAM_DNS_ADD;
+        const parameters = {
+            data: config,
+        };
+
+        return this.makeRequest(path, method, parameters);
+    }
+
+    removeUpstreamDNSFile(config: any) {
+        const { path, method } = this.UPSTREAM_DNS_REMOVE;
+        const parameters = {
+            data: config,
+        };
+
+        return this.makeRequest(path, method, parameters);
+    }
+
+    setUpstreamDNSFile(config: any) {
+        const { path, method } = this.UPSTREAM_DNS_SET;
+        const parameters = {
+            data: config,
+        };
+
+        return this.makeRequest(path, method, parameters);
+    }
+
+    refreshUpstreamDNSFiles() {
+        const { path, method } = this.UPSTREAM_DNS_REFRESH;
+
+        return this.makeRequest(path, method);
     }
 
     // Parental

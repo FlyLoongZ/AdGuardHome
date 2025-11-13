@@ -758,5 +758,17 @@
     "saturday_short": "周六",
     "upstream_dns_cache_configuration": "上游 DNS 缓存配置",
     "enable_upstream_dns_cache": "为该客户端的自定义上游配置启用 DNS 缓存",
-    "dns_cache_size": "DNS 缓存大小，单位：字节"
+    "dns_cache_size": "DNS 缓存大小，单位：字节",
+    "dns_upstream_files": "DNS 分流",
+    "dns_upstream_files_desc": "DNS 分流配置和规则管理",
+    "dns_upstream_files_hint": "DNS 分流规则管理，配置特定域名的上游服务器",
+    "dns分流_files": "DNS 分流文件",
+    "dns分流_files_desc": "管理 DNS 分流规则文件",
+    "dns分流_files_hint": "DNS 分流规则文件管理，提供类似广告过滤规则的下载功能",
+    "add_upstream_dns_file": "添加规则",
+    "upstream_dns_file_added_successfully": "DNS 分流规则添加成功",
+    "upstream_dns_file_removed_successfully": "DNS 分流规则删除成功",
+    "upstream_dns_file_updated": "DNS 分流规则更新成功",
+    "upstream_dns_files_updated": "{{count}} DNS 分流规则已更新",
+    "upstream_dns_files_up_to_date_toast": "所有 DNS 分流规则都是最新的"
 }
