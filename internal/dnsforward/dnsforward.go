@@ -556,7 +556,9 @@ func (s *Server) prepareUpstreamSettings(boot upstream.Resolver) (err error) {
 	if err != nil {
 		return fmt.Errorf("loading managed upstreams: %w", err)
 	}
-	upstreams = append(upstreams, managedUpstreams...)
+
+	// Merge all upstream sources and remove duplicates
+	upstreams = mergeUpstreams(upstreams, managedUpstreams)
 
 	uc, err := newUpstreamConfig(upstreams, defaultDNS, &upstream.Options{
 		Logger:       aghslog.NewForUpstream(s.baseLogger, aghslog.UpstreamTypeMain),

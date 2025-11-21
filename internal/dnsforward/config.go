@@ -519,6 +519,25 @@ func (s *Server) loadManagedUpstreams(
 	return upstreams, nil
 }
 
+// mergeUpstreams merges multiple upstream DNS lists and removes duplicates.
+// It preserves the order of upstreams, keeping the first occurrence of each
+// unique upstream server.
+func mergeUpstreams(lists ...[]string) []string {
+	seen := container.NewMapSet[string]()
+	var merged []string
+
+	for _, list := range lists {
+		for _, upstream := range list {
+			if !seen.Has(upstream) {
+				seen.Add(upstream)
+				merged = append(merged, upstream)
+			}
+		}
+	}
+
+	return merged
+}
+
 // collectListenAddr adds addrPort to addrs.  It also adds its port to
 // unspecPorts if its address is unspecified.
 func collectListenAddr(
