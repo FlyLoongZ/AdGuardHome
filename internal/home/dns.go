@@ -109,7 +109,7 @@ func initDNS(
 		return err
 	}
 
-	return initDNSServer(
+	err = initDNSServer(
 		ctx,
 		globalContext.filters,
 		globalContext.stats,
@@ -121,6 +121,28 @@ func initDNS(
 		baseLogger,
 		confModifier,
 	)
+	if err != nil {
+		return err
+	}
+
+	// Set up the callback for upstream DNS files updates
+	globalContext.filters.SetOnUpstreamDNSFilesUpdated(func() {
+		if globalContext.dnsServer != nil {
+			// Use a background context for the reload operation
+			reloadCtx := context.Background()
+			err := globalContext.dnsServer.ReloadUpstreams(reloadCtx)
+			if err != nil {
+				baseLogger.ErrorContext(
+					reloadCtx,
+					"failed to reload upstreams after file update",
+					slogutil.KeyError,
+					err,
+				)
+			}
+		}
+	})
+
+	return nil
 }
 
 // initDNSServer initializes the [context.dnsServer].  To only use the internal
