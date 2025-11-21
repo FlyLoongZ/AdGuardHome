@@ -76,9 +76,6 @@ func (d *DNSFilter) GetUpstreamDNSFiles() (upstreams []string, err error) {
 
 		path := file.Path(d.conf.DataDir)
 
-		// Change path to use upstream_dns_files directory
-		path = filepath.Join(d.conf.DataDir, upstreamDNSDir, filepath.Base(path))
-
 		data, err := os.ReadFile(path)
 		if err != nil {
 			if os.IsNotExist(err) {

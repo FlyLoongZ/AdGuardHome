@@ -1044,11 +1044,11 @@ func New(c *Config, blockFilters []Filter) (d *DNSFilter, err error) {
 	}
 
 	// Create upstream DNS files directory
-	err = os.MkdirAll(filepath.Join(d.conf.DataDir, "upstream_dns_files"), aghos.DefaultPermDir)
+	err = d.ensureUpstreamDNSDir()
 	if err != nil {
 		d.Close()
 
-		return nil, fmt.Errorf("making upstream dns directory: %w", err)
+		return nil, err
 	}
 
 	d.loadFilters(ctx, d.conf.Filters)

@@ -52,7 +52,7 @@ func (filter *FilterYAML) unload() {
 func (filter *FilterYAML) Path(dataDir string) string {
 	dir := filterDir
 	if filter.isUpstream {
-		dir = "upstream_dns_files"
+		dir = upstreamDNSDir
 	}
 	return filepath.Join(
 		dataDir,
@@ -301,9 +301,10 @@ func (d *DNSFilter) listsToUpdate(filters *[]FilterYAML, force bool) (toUpd []Fi
 			Filter: Filter{
 				ID: flt.ID,
 			},
-			URL:      flt.URL,
-			Name:     flt.Name,
-			checksum: flt.checksum,
+			URL:        flt.URL,
+			Name:       flt.Name,
+			checksum:   flt.checksum,
+			isUpstream: flt.isUpstream,
 		})
 	}
 
