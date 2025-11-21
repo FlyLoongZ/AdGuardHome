@@ -900,6 +900,56 @@ func (s *Server) Reconfigure(ctx context.Context, conf *ServerConfig) error {
 	return nil
 }
 
+// ReloadUpstreams reloads the upstream DNS configuration. This is called when
+// upstream DNS files are updated.
+func (s *Server) ReloadUpstreams(ctx context.Context) (err error) {
+	s.serverLock.Lock()
+	defer s.serverLock.Unlock()
+
+	if !s.isRunning {
+		s.logger.DebugContext(ctx, "dns server not running, skipping upstream reload")
+		return nil
+	}
+
+	s.logger.InfoContext(ctx, "reloading upstream dns configuration")
+
+	// Re-prepare upstream settings with the current bootstrap resolver
+	err = s.prepareUpstreamSettings(ctx, s.bootstrap)
+	if err != nil {
+		return fmt.Errorf("preparing upstream settings: %w", err)
+	}
+
+	// Reconfigure the DNS proxy with updated upstream configuration
+	// We need to stop and restart to apply the new upstream config
+	s.stopLocked(ctx)
+
+	// Wait a bit for the server to fully stop
+	time.Sleep(100 * time.Millisecond)
+
+	// Re-initialize the DNS proxy with new configuration
+	proxyConfig, err := s.newProxyConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("preparing proxy config: %w", err)
+	}
+
+	dnsProxy, err := proxy.New(proxyConfig)
+	if err != nil {
+		return fmt.Errorf("creating proxy: %w", err)
+	}
+
+	s.dnsProxy = dnsProxy
+
+	// Restart the server
+	err = s.startLocked(ctx)
+	if err != nil {
+		return fmt.Errorf("starting dns server: %w", err)
+	}
+
+	s.logger.InfoContext(ctx, "upstream dns configuration reloaded successfully")
+
+	return nil
+}
+
 // ServeHTTP is a HTTP handler method we use to provide DNS-over-HTTPS.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if prx := s.proxy(); prx != nil {

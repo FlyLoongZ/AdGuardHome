@@ -267,5 +267,11 @@ func (d *DNSFilter) updateUpstreamDNSFilesInLoop() {
 
 	if updated > 0 {
 		d.logger.InfoContext(ctx, "updated upstream dns files", "count", updated)
+
+		// Notify DNS server to reload upstreams if callback is set
+		if d.onUpstreamDNSFilesUpdated != nil {
+			d.logger.DebugContext(ctx, "notifying dns server to reload upstreams")
+			d.onUpstreamDNSFilesUpdated()
+		}
 	}
 }
