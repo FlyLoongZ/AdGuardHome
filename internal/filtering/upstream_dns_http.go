@@ -121,10 +121,9 @@ func (d *DNSFilter) handleUpstreamDNSAddURL(w http.ResponseWriter, r *http.Reque
 
 	// Set necessary properties
 	filt := FilterYAML{
-		Enabled:    true,
-		URL:        fj.URL,
-		Name:       fj.Name,
-		isUpstream: true,
+		Enabled: true,
+		URL:     fj.URL,
+		Name:    fj.Name,
 		Filter: Filter{
 			ID: d.idGen.next(),
 		},
@@ -324,10 +323,9 @@ func (d *DNSFilter) handleUpstreamDNSSetURL(w http.ResponseWriter, r *http.Reque
 	}
 
 	filt := FilterYAML{
-		Enabled:    fj.Data.Enabled,
-		Name:       fj.Data.Name,
-		URL:        fj.Data.URL,
-		isUpstream: true,
+		Enabled: fj.Data.Enabled,
+		Name:    fj.Data.Name,
+		URL:     fj.Data.URL,
 	}
 
 	restart, err := d.upstreamDNSFileSetProperties(fj.URL, filt)

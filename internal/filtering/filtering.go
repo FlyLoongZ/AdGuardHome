@@ -1043,21 +1043,8 @@ func New(c *Config, blockFilters []Filter) (d *DNSFilter, err error) {
 		return nil, fmt.Errorf("making filtering directory: %w", err)
 	}
 
-	// Create upstream DNS files directory
-	err = os.MkdirAll(filepath.Join(d.conf.DataDir, "upstream_dns_files"), aghos.DefaultPermDir)
-	if err != nil {
-		d.Close()
-
-		return nil, fmt.Errorf("making upstream dns directory: %w", err)
-	}
-
 	d.loadFilters(ctx, d.conf.Filters)
 	d.loadFilters(ctx, d.conf.WhitelistFilters)
-
-	// Mark upstream DNS files before loading
-	for i := range d.conf.UpstreamDNSFiles {
-		d.conf.UpstreamDNSFiles[i].isUpstream = true
-	}
 	d.loadFilters(ctx, d.conf.UpstreamDNSFiles)
 
 	d.conf.Filters = deduplicateFilters(d.conf.Filters)

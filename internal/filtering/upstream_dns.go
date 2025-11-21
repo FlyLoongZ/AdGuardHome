@@ -4,16 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
-	"github.com/AdguardTeam/AdGuardHome/internal/aghos"
 	"github.com/AdguardTeam/golibs/errors"
 )
-
-// upstreamDNSDir is the subdirectory of a data directory to store downloaded
-// upstream DNS files.
-const upstreamDNSDir = "upstream_dns_files"
 
 // refreshUpstreamDNSFilesIntl checks upstream DNS files and updates them if necessary.
 // If force is true, it ignores the file.LastUpdated field value.
@@ -59,11 +53,6 @@ func (d *DNSFilter) tryRefreshUpstreamDNSFiles(force bool) (updated int, isNetwo
 	return updated, isNetworkErr, ok
 }
 
-// UpstreamDNSFilePath returns the path for an upstream DNS file with the given ID.
-func (d *DNSFilter) UpstreamDNSFilePath(id uint64) string {
-	return filepath.Join(d.conf.DataDir, upstreamDNSDir, fmt.Sprintf("%d.txt", id))
-}
-
 // GetUpstreamDNSFiles returns all upstream DNS files from all sources.
 func (d *DNSFilter) GetUpstreamDNSFiles() (upstreams []string, err error) {
 	d.conf.filtersMu.RLock()
@@ -75,9 +64,6 @@ func (d *DNSFilter) GetUpstreamDNSFiles() (upstreams []string, err error) {
 		}
 
 		path := file.Path(d.conf.DataDir)
-
-		// Change path to use upstream_dns_files directory
-		path = filepath.Join(d.conf.DataDir, upstreamDNSDir, filepath.Base(path))
 
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -98,17 +84,6 @@ func (d *DNSFilter) GetUpstreamDNSFiles() (upstreams []string, err error) {
 	}
 
 	return upstreams, nil
-}
-
-// ensureUpstreamDNSDir creates the upstream DNS files directory if it doesn't exist.
-func (d *DNSFilter) ensureUpstreamDNSDir() (err error) {
-	dirPath := filepath.Join(d.conf.DataDir, upstreamDNSDir)
-	err = os.MkdirAll(dirPath, aghos.DefaultPermDir)
-	if err != nil {
-		return fmt.Errorf("making upstream dns directory: %w", err)
-	}
-
-	return nil
 }
 
 // splitLines splits text by newlines and returns non-empty lines.
@@ -179,9 +154,6 @@ func (d *DNSFilter) upstreamDNSFileAdd(flt FilterYAML) (err error) {
 		return errFilterExists
 	}
 
-	// Mark as upstream DNS file
-	flt.isUpstream = true
-
 	d.conf.UpstreamDNSFiles = append(d.conf.UpstreamDNSFiles, flt)
 
 	return nil
@@ -224,8 +196,6 @@ func (d *DNSFilter) upstreamDNSFileSetProperties(
 
 	flt := &files[idx]
 
-	// Ensure upstream flag is set
-	newFile.isUpstream = true
 	d.logger.DebugContext(
 		context.TODO(),
 		"updating upstream dns file",
