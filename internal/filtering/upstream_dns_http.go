@@ -368,6 +368,11 @@ func (d *DNSFilter) handleUpstreamDNSRefresh(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	if resp.Updated > 0 && d.onUpstreamDNSFilesUpdated != nil {
+		l.DebugContext(ctx, "notifying dns server to reload upstreams after manual refresh")
+		d.onUpstreamDNSFilesUpdated()
+	}
+
 	aghhttp.WriteJSONResponseOK(ctx, l, w, r, resp)
 }
 
