@@ -337,8 +337,11 @@ func (d *DNSFilter) handleUpstreamDNSSetURL(w http.ResponseWriter, r *http.Reque
 
 	d.conf.ConfModifier.Apply(ctx)
 	if restart {
-		// No need to restart filtering engine for upstream DNS files
-		// They will be picked up on next DNS query
+		// Notify DNS server to reload upstreams after configuration change
+		if d.onUpstreamDNSFilesUpdated != nil {
+			d.logger.DebugContext(ctx, "notifying dns server to reload upstreams after set_url")
+			d.onUpstreamDNSFilesUpdated()
+		}
 	}
 }
 
@@ -368,9 +371,13 @@ func (d *DNSFilter) handleUpstreamDNSRefresh(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if resp.Updated > 0 && d.onUpstreamDNSFilesUpdated != nil {
-		l.DebugContext(ctx, "notifying dns server to reload upstreams after manual refresh")
-		d.onUpstreamDNSFilesUpdated()
+	if resp.Updated > 0 {
+		// Use a local copy to avoid race conditions
+		callback := d.onUpstreamDNSFilesUpdated
+		if callback != nil {
+			l.DebugContext(ctx, "notifying dns server to reload upstreams after manual refresh")
+			callback()
+		}
 	}
 
 	aghhttp.WriteJSONResponseOK(ctx, l, w, r, resp)

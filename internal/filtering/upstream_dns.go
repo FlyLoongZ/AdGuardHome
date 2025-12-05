@@ -23,6 +23,7 @@ func (d *DNSFilter) refreshUpstreamDNSFilesIntl(force bool) (int, bool) {
 
 	updNum, lists, toUpd, isNetErr := d.refreshFiltersArray(ctx, &d.conf.UpstreamDNSFiles, force)
 	if isNetErr {
+		d.logger.ErrorContext(ctx, "network error during upstream dns files update")
 		return 0, true
 	}
 
@@ -269,9 +270,11 @@ func (d *DNSFilter) updateUpstreamDNSFilesInLoop() {
 		d.logger.InfoContext(ctx, "updated upstream dns files", "count", updated)
 
 		// Notify DNS server to reload upstreams if callback is set
-		if d.onUpstreamDNSFilesUpdated != nil {
+		// Use a local copy to avoid race conditions
+		callback := d.onUpstreamDNSFilesUpdated
+		if callback != nil {
 			d.logger.DebugContext(ctx, "notifying dns server to reload upstreams")
-			d.onUpstreamDNSFilesUpdated()
+			callback()
 		}
 	}
 }
