@@ -179,6 +179,13 @@ func (d *DNSFilter) handleUpstreamDNSAddURL(w http.ResponseWriter, r *http.Reque
 
 	d.conf.ConfModifier.Apply(ctx)
 
+	// Notify DNS server to reload upstreams after adding new file
+	callback := d.onUpstreamDNSFilesUpdated
+	if callback != nil {
+		l.DebugContext(ctx, "notifying dns server to reload upstreams after add_url")
+		callback()
+	}
+
 	_, err = fmt.Fprintf(w, "OK %d rules\n", filt.RulesCount)
 	if err != nil {
 		aghhttp.ErrorAndLog(
