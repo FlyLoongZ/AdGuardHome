@@ -2,8 +2,6 @@ package filtering
 
 import (
 	"context"
-	"fmt"
-	"os"
 	"time"
 
 	"github.com/AdguardTeam/golibs/errors"
@@ -52,95 +50,6 @@ func (d *DNSFilter) tryRefreshUpstreamDNSFiles(force bool) (updated int, isNetwo
 	updated, isNetworkErr = d.refreshUpstreamDNSFilesIntl(force)
 
 	return updated, isNetworkErr, ok
-}
-
-// GetUpstreamDNSFiles returns all upstream DNS files from all sources.
-func (d *DNSFilter) GetUpstreamDNSFiles() (upstreams []string, err error) {
-	d.conf.filtersMu.RLock()
-	defer d.conf.filtersMu.RUnlock()
-
-	for _, file := range d.conf.UpstreamDNSFiles {
-		if !file.Enabled {
-			continue
-		}
-
-		path := file.Path(d.conf.DataDir)
-
-		data, err := os.ReadFile(path)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return nil, fmt.Errorf("reading upstream dns file %s: %w", path, err)
-		}
-
-		// Parse the file content - each line is an upstream server
-		lines := splitLines(string(data))
-		for _, line := range lines {
-			line = trimComment(line)
-			if line != "" {
-				upstreams = append(upstreams, line)
-			}
-		}
-	}
-
-	return upstreams, nil
-}
-
-// splitLines splits text by newlines and returns non-empty lines.
-func splitLines(text string) []string {
-	var lines []string
-	start := 0
-
-	for i := 0; i < len(text); i++ {
-		if text[i] == '\n' || text[i] == '\r' {
-			if start < i {
-				lines = append(lines, text[start:i])
-			}
-			start = i + 1
-			// Skip \r\n
-			if i+1 < len(text) && text[i] == '\r' && text[i+1] == '\n' {
-				i++
-				start = i + 1
-			}
-		}
-	}
-
-	if start < len(text) {
-		lines = append(lines, text[start:])
-	}
-
-	return lines
-}
-
-// trimComment removes comments from a line (text after #).
-func trimComment(line string) string {
-	if idx := findCommentStart(line); idx >= 0 {
-		line = line[:idx]
-	}
-
-	// Trim whitespace
-	start := 0
-	for start < len(line) && (line[start] == ' ' || line[start] == '\t') {
-		start++
-	}
-
-	end := len(line)
-	for end > start && (line[end-1] == ' ' || line[end-1] == '\t') {
-		end--
-	}
-
-	return line[start:end]
-}
-
-// findCommentStart finds the position of comment start (#).
-func findCommentStart(line string) int {
-	for i := 0; i < len(line); i++ {
-		if line[i] == '#' {
-			return i
-		}
-	}
-	return -1
 }
 
 // upstreamDNSFileAdd adds a new upstream DNS file.

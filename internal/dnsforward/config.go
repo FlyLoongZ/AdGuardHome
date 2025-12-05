@@ -18,6 +18,7 @@ import (
 	"github.com/AdguardTeam/AdGuardHome/internal/aghslog"
 	"github.com/AdguardTeam/AdGuardHome/internal/aghtls"
 	"github.com/AdguardTeam/AdGuardHome/internal/client"
+	"github.com/AdguardTeam/AdGuardHome/internal/filtering"
 	"github.com/AdguardTeam/dnsproxy/proxy"
 	"github.com/AdguardTeam/dnsproxy/upstream"
 	"github.com/AdguardTeam/golibs/container"
@@ -507,9 +508,26 @@ func (s *Server) loadManagedUpstreams(
 		return nil, nil
 	}
 
-	upstreams, err = s.dnsFilter.GetUpstreamDNSFiles()
-	if err != nil {
-		return nil, fmt.Errorf("loading managed upstream dns files: %w", err)
+	var c filtering.Config
+	s.dnsFilter.WriteDiskConfig(&c)
+
+	for _, file := range c.UpstreamDNSFiles {
+		if !file.Enabled {
+			continue
+		}
+
+		path := file.Path(c.DataDir)
+		var data []byte
+		data, err = os.ReadFile(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("reading upstream dns file %s: %w", path, err)
+		}
+
+		fileUpstreams := stringutil.SplitTrimmed(string(data), "\n")
+		upstreams = append(upstreams, stringutil.FilterOut(fileUpstreams, aghnet.IsCommentOrEmpty)...)
 	}
 
 	if len(upstreams) > 0 {
