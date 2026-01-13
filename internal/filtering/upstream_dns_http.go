@@ -226,6 +226,7 @@ func (d *DNSFilter) handleUpstreamDNSRemoveURL(w http.ResponseWriter, r *http.Re
 	}
 
 	var deleted FilterYAML
+	deletedOK := false
 	func() {
 		d.conf.filtersMu.Lock()
 		defer d.conf.filtersMu.Unlock()
@@ -262,11 +263,19 @@ func (d *DNSFilter) handleUpstreamDNSRemoveURL(w http.ResponseWriter, r *http.Re
 		}
 
 		*files = slices.Delete(*files, delIdx, delIdx+1)
+		deletedOK = true
 
 		d.logger.InfoContext(ctx, "deleted upstream dns file", "id", deleted.ID)
 	}()
 
 	d.conf.ConfModifier.Apply(ctx)
+	if deletedOK {
+		callback := d.onUpstreamDNSFilesUpdated
+		if callback != nil {
+			d.logger.DebugContext(ctx, "notifying dns server to reload upstreams after remove_url")
+			callback()
+		}
+	}
 
 	_, err = fmt.Fprintf(w, "OK %d rules\n", deleted.RulesCount)
 	if err != nil {
