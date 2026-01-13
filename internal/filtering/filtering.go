@@ -1132,7 +1132,7 @@ func (d *DNSFilter) periodicallyRefreshFilters(ivl time.Duration) (nextIvl time.
 	}
 
 	isNetErr, ok := false, false
-	_, isNetErr, ok = d.tryRefreshFilters(true, true, false)
+	_, isNetErr, ok = d.tryRefreshFilters(true, true, true, false)
 
 	// Also update upstream DNS files
 	d.updateUpstreamDNSFilesInLoop()

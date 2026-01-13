@@ -10,9 +10,7 @@ import (
 // refreshUpstreamDNSFilesIntl checks upstream DNS files and updates them if necessary.
 // If force is true, it ignores the file.LastUpdated field value.
 // It returns the number of updated files and true if there was a network error.
-func (d *DNSFilter) refreshUpstreamDNSFilesIntl(force bool) (int, bool) {
-	ctx := context.TODO()
-
+func (d *DNSFilter) refreshUpstreamDNSFilesIntl(ctx context.Context, force bool) (int, bool) {
 	updNum := 0
 	d.logger.DebugContext(ctx, "starting upstream dns files update")
 	defer func() {
@@ -37,19 +35,6 @@ func (d *DNSFilter) refreshUpstreamDNSFilesIntl(force bool) (int, bool) {
 	}
 
 	return updNum, false
-}
-
-// tryRefreshUpstreamDNSFiles is like refreshUpstreamDNSFilesIntl, but backs down
-// if the update is already going on.
-func (d *DNSFilter) tryRefreshUpstreamDNSFiles(force bool) (updated int, isNetworkErr, ok bool) {
-	if ok = d.refreshLock.TryLock(); !ok {
-		return 0, false, false
-	}
-	defer d.refreshLock.Unlock()
-
-	updated, isNetworkErr = d.refreshUpstreamDNSFilesIntl(force)
-
-	return updated, isNetworkErr, ok
 }
 
 // upstreamDNSFileAdd adds a new upstream DNS file.
@@ -164,7 +149,7 @@ func (d *DNSFilter) updateUpstreamDNSFilesInLoop() {
 		return
 	}
 
-	updated, isNetErr, ok := d.tryRefreshUpstreamDNSFiles(false)
+	_, isNetErr, ok := d.tryRefreshFilters(false, false, true, false)
 	if !ok {
 		d.logger.DebugContext(ctx, "upstream dns files update already in progress")
 		return
@@ -172,18 +157,5 @@ func (d *DNSFilter) updateUpstreamDNSFilesInLoop() {
 
 	if isNetErr {
 		d.logger.WarnContext(ctx, "network error while updating upstream dns files")
-		return
-	}
-
-	if updated > 0 {
-		d.logger.InfoContext(ctx, "updated upstream dns files", "count", updated)
-
-		// Notify DNS server to reload upstreams if callback is set
-		// Use a local copy to avoid race conditions
-		callback := d.onUpstreamDNSFilesUpdated
-		if callback != nil {
-			d.logger.DebugContext(ctx, "notifying dns server to reload upstreams")
-			callback()
-		}
 	}
 }

@@ -364,7 +364,7 @@ func (d *DNSFilter) handleUpstreamDNSRefresh(w http.ResponseWriter, r *http.Requ
 	resp := struct {
 		Updated int `json:"updated"`
 	}{}
-	resp.Updated, _, ok = d.tryRefreshUpstreamDNSFiles(true)
+	resp.Updated, _, ok = d.tryRefreshFilters(false, false, true, true)
 	if !ok {
 		aghhttp.ErrorAndLog(
 			ctx,

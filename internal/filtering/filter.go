@@ -260,13 +260,44 @@ func deduplicateFilters(filters []FilterYAML) (deduplicated []FilterYAML) {
 //
 // TODO(e.burkov):  Get rid of the concurrency pattern which requires the
 // [sync.Mutex.TryLock].
-func (d *DNSFilter) tryRefreshFilters(block, allow, force bool) (updated int, isNetworkErr, ok bool) {
+func (d *DNSFilter) tryRefreshFilters(
+	block, allow, upstream, force bool,
+) (updated int, isNetworkErr, ok bool) {
 	if ok = d.refreshLock.TryLock(); !ok {
 		return 0, false, false
 	}
 	defer d.refreshLock.Unlock()
 
-	updated, isNetworkErr = d.refreshFiltersIntl(block, allow, force)
+	ctx := context.TODO()
+	upstreamUpdated := 0
+	upstreamNetErr := false
+	upstreamCallback := d.onUpstreamDNSFilesUpdated
+
+	defer func() {
+		if !upstream || upstreamNetErr || upstreamUpdated == 0 {
+			return
+		}
+
+		d.logger.InfoContext(ctx, "updated upstream dns files", "count", upstreamUpdated)
+
+		if upstreamCallback != nil {
+			d.logger.DebugContext(ctx, "notifying dns server to reload upstreams")
+			upstreamCallback()
+		}
+	}()
+
+	if block || allow {
+		updated, isNetworkErr = d.refreshFiltersIntl(block, allow, force)
+	}
+
+	if upstream {
+		upstreamUpdated, upstreamNetErr = d.refreshUpstreamDNSFilesIntl(ctx, force)
+		updated += upstreamUpdated
+
+		if !block && !allow {
+			isNetworkErr = upstreamNetErr
+		}
+	}
 
 	return updated, isNetworkErr, ok
 }
