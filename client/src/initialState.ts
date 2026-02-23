@@ -197,6 +197,7 @@ export type StatsData = {
     processingReset: boolean;
     interval: number;
     customInterval?: number;
+    ignored_enabled: boolean;
     dnsQueries: number[];
     blockedFiltering: number[];
     replacedParental: number[];
@@ -380,6 +381,7 @@ export type QueryLogsData = {
     isDetailed: boolean;
     isEntireLog: boolean;
     customInterval: any;
+    ignored_enabled: boolean;
 };
 
 export type ServicesData = {
@@ -592,6 +594,7 @@ export const initialState: RootState = {
         isDetailed: true,
         isEntireLog: false,
         customInterval: null,
+        ignored_enabled: true,
     },
     rewrites: {
         processing: true,
@@ -623,6 +626,7 @@ export const initialState: RootState = {
         processingReset: false,
         interval: DAY,
         customInterval: null,
+        ignored_enabled: true,
         dnsQueries: [],
         blockedFiltering: [],
         replacedParental: [],
