@@ -179,12 +179,7 @@ func (d *DNSFilter) handleUpstreamDNSAddURL(w http.ResponseWriter, r *http.Reque
 
 	d.conf.ConfModifier.Apply(ctx)
 
-	// Notify DNS server to reload upstreams after adding new file
-	callback := d.onUpstreamDNSFilesUpdated
-	if callback != nil {
-		l.DebugContext(ctx, "notifying dns server to reload upstreams after add_url")
-		callback()
-	}
+	d.notifyUpstreamDNSFilesUpdated(ctx, "notifying dns server to reload upstreams after add_url")
 
 	_, err = fmt.Fprintf(w, "OK %d rules\n", filt.RulesCount)
 	if err != nil {
@@ -270,11 +265,7 @@ func (d *DNSFilter) handleUpstreamDNSRemoveURL(w http.ResponseWriter, r *http.Re
 
 	d.conf.ConfModifier.Apply(ctx)
 	if deletedOK {
-		callback := d.onUpstreamDNSFilesUpdated
-		if callback != nil {
-			d.logger.DebugContext(ctx, "notifying dns server to reload upstreams after remove_url")
-			callback()
-		}
+		d.notifyUpstreamDNSFilesUpdated(ctx, "notifying dns server to reload upstreams after remove_url")
 	}
 
 	_, err = fmt.Fprintf(w, "OK %d rules\n", deleted.RulesCount)
@@ -353,11 +344,7 @@ func (d *DNSFilter) handleUpstreamDNSSetURL(w http.ResponseWriter, r *http.Reque
 
 	d.conf.ConfModifier.Apply(ctx)
 	if restart {
-		// Notify DNS server to reload upstreams after configuration change
-		if d.onUpstreamDNSFilesUpdated != nil {
-			d.logger.DebugContext(ctx, "notifying dns server to reload upstreams after set_url")
-			d.onUpstreamDNSFilesUpdated()
-		}
+		d.notifyUpstreamDNSFilesUpdated(ctx, "notifying dns server to reload upstreams after set_url")
 	}
 }
 
@@ -385,15 +372,6 @@ func (d *DNSFilter) handleUpstreamDNSRefresh(w http.ResponseWriter, r *http.Requ
 		)
 
 		return
-	}
-
-	if resp.Updated > 0 {
-		// Use a local copy to avoid race conditions
-		callback := d.onUpstreamDNSFilesUpdated
-		if callback != nil {
-			l.DebugContext(ctx, "notifying dns server to reload upstreams after manual refresh")
-			callback()
-		}
 	}
 
 	aghhttp.WriteJSONResponseOK(ctx, l, w, r, resp)

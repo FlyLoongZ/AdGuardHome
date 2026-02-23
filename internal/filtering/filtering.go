@@ -329,6 +329,17 @@ func (d *DNSFilter) SetOnUpstreamDNSFilesUpdated(f func()) {
 	d.onUpstreamDNSFilesUpdated = f
 }
 
+// notifyUpstreamDNSFilesUpdated notifies the DNS server to reload upstreams.
+func (d *DNSFilter) notifyUpstreamDNSFilesUpdated(ctx context.Context, msg string) {
+	callback := d.onUpstreamDNSFilesUpdated
+	if callback == nil {
+		return
+	}
+
+	d.logger.DebugContext(ctx, msg)
+	callback()
+}
+
 // Settings returns filtering settings.
 func (d *DNSFilter) Settings() (s *Settings) {
 	d.confMu.RLock()
@@ -1135,9 +1146,6 @@ func (d *DNSFilter) periodicallyRefreshFilters(ivl time.Duration) (nextIvl time.
 
 	isNetErr, ok := false, false
 	_, isNetErr, ok = d.tryRefreshFilters(true, true, true, false)
-
-	// Also update upstream DNS files
-	d.updateUpstreamDNSFilesInLoop()
 
 	if ok && !isNetErr {
 		ivl = maxInterval

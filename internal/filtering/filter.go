@@ -271,7 +271,6 @@ func (d *DNSFilter) tryRefreshFilters(
 	ctx := context.TODO()
 	upstreamUpdated := 0
 	upstreamNetErr := false
-	upstreamCallback := d.onUpstreamDNSFilesUpdated
 
 	defer func() {
 		if !upstream || upstreamNetErr || upstreamUpdated == 0 {
@@ -279,11 +278,7 @@ func (d *DNSFilter) tryRefreshFilters(
 		}
 
 		d.logger.InfoContext(ctx, "updated upstream dns files", "count", upstreamUpdated)
-
-		if upstreamCallback != nil {
-			d.logger.DebugContext(ctx, "notifying dns server to reload upstreams")
-			upstreamCallback()
-		}
+		d.notifyUpstreamDNSFilesUpdated(ctx, "notifying dns server to reload upstreams")
 	}()
 
 	if block || allow {

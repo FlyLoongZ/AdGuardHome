@@ -876,34 +876,62 @@ func (s *Server) Reconfigure(ctx context.Context, conf *ServerConfig) error {
 	s.logger.InfoContext(ctx, "starting reconfiguring server")
 	defer s.logger.InfoContext(ctx, "finished reconfiguring server")
 
+	if conf == nil {
+		conf = &s.conf
+	}
+
+	err := s.restartLocked(ctx, func() error {
+		if s.addrProc != nil {
+			closeErr := s.addrProc.Close()
+			if closeErr != nil {
+				s.logger.ErrorContext(ctx, "closing address processor", slogutil.KeyError, closeErr)
+			}
+		}
+
+		// TODO(e.burkov):  It seems an error here brings the server down, which
+		// is not reliable enough.
+		return s.Prepare(ctx, conf)
+	})
+	if err != nil {
+		return fmt.Errorf("could not reconfigure the server: %w", err)
+	}
+
+	return nil
+}
+
+// restartLocked stops the DNS server, applies a configuration update, and
+// starts the server again.  s.serverLock is expected to be locked.
+func (s *Server) restartLocked(ctx context.Context, prepare func() error) (err error) {
 	s.stopLocked(ctx)
 
 	// It seems that net.Listener.Close() doesn't close file descriptors right
 	// away.  We wait for some time and hope that this fd will be closed.
 	time.Sleep(100 * time.Millisecond)
 
-	if s.addrProc != nil {
-		err := s.addrProc.Close()
-		if err != nil {
-			s.logger.ErrorContext(ctx, "closing address processor", slogutil.KeyError, err)
-		}
-	}
-
-	if conf == nil {
-		conf = &s.conf
-	}
-
-	// TODO(e.burkov):  It seems an error here brings the server down, which is
-	// not reliable enough.
-	err := s.Prepare(ctx, conf)
+	err = prepare()
 	if err != nil {
-		return fmt.Errorf("could not reconfigure the server: %w", err)
+		return err
 	}
 
-	err = s.startLocked(ctx)
+	return s.startLocked(ctx)
+}
+
+// rebuildProxyLocked creates a new proxy and assigns it to the server.
+// s.serverLock is expected to be locked.
+func (s *Server) rebuildProxyLocked(ctx context.Context) (err error) {
+	var proxyConfig *proxy.Config
+	proxyConfig, err = s.newProxyConfig(ctx)
 	if err != nil {
-		return fmt.Errorf("could not reconfigure the server: %w", err)
+		return fmt.Errorf("preparing proxy config: %w", err)
 	}
+
+	var dnsProxy *proxy.Proxy
+	dnsProxy, err = proxy.New(proxyConfig)
+	if err != nil {
+		return fmt.Errorf("creating proxy: %w", err)
+	}
+
+	s.dnsProxy = dnsProxy
 
 	return nil
 }
@@ -927,30 +955,11 @@ func (s *Server) ReloadUpstreams(ctx context.Context) (err error) {
 		return fmt.Errorf("preparing upstream settings: %w", err)
 	}
 
-	// Reconfigure the DNS proxy with updated upstream configuration
-	// We need to stop and restart to apply the new upstream config
-	s.stopLocked(ctx)
-
-	// Wait a bit for the server to fully stop
-	time.Sleep(100 * time.Millisecond)
-
-	// Re-initialize the DNS proxy with new configuration
-	proxyConfig, err := s.newProxyConfig(ctx)
+	err = s.restartLocked(ctx, func() error {
+		return s.rebuildProxyLocked(ctx)
+	})
 	if err != nil {
-		return fmt.Errorf("preparing proxy config: %w", err)
-	}
-
-	dnsProxy, err := proxy.New(proxyConfig)
-	if err != nil {
-		return fmt.Errorf("creating proxy: %w", err)
-	}
-
-	s.dnsProxy = dnsProxy
-
-	// Restart the server
-	err = s.startLocked(ctx)
-	if err != nil {
-		return fmt.Errorf("starting dns server: %w", err)
+		return fmt.Errorf("restarting dns server: %w", err)
 	}
 
 	s.logger.InfoContext(ctx, "upstream dns configuration reloaded successfully")

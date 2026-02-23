@@ -140,22 +140,3 @@ func (d *DNSFilter) upstreamDNSFileSetProperties(
 
 	return d.update(flt)
 }
-
-// updateUpstreamDNSFilesInLoop is called periodically to check for updates.
-func (d *DNSFilter) updateUpstreamDNSFilesInLoop() {
-	ctx := context.TODO()
-
-	if d.conf.FiltersUpdateIntervalHours == 0 {
-		return
-	}
-
-	_, isNetErr, ok := d.tryRefreshFilters(false, false, true, false)
-	if !ok {
-		d.logger.DebugContext(ctx, "upstream dns files update already in progress")
-		return
-	}
-
-	if isNetErr {
-		d.logger.WarnContext(ctx, "network error while updating upstream dns files")
-	}
-}
