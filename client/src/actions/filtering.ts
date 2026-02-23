@@ -237,7 +237,7 @@ export const addUpstreamDNSFile =
             if (getState().filtering.isModalOpen) {
                 dispatch(toggleFilteringModal());
             }
-            dispatch(addSuccessToast('upstream_dns_file_added_successfully'));
+            dispatch(addSuccessToast('filter_added_successfully'));
             dispatch(getUpstreamDNSFilesStatus());
         } catch (error) {
             dispatch(addErrorToast({ error }));
@@ -259,7 +259,7 @@ export const removeUpstreamDNSFile =
             if (getState().filtering.isModalOpen) {
                 dispatch(toggleFilteringModal());
             }
-            dispatch(addSuccessToast('upstream_dns_file_removed_successfully'));
+            dispatch(addSuccessToast('filter_removed_successfully'));
             dispatch(getUpstreamDNSFilesStatus());
         } catch (error) {
             dispatch(addErrorToast({ error }));
@@ -299,7 +299,7 @@ export const editUpstreamDNSFile =
             if (getState().filtering.isModalOpen) {
                 dispatch(toggleFilteringModal());
             }
-            dispatch(addSuccessToast('upstream_dns_file_updated'));
+            dispatch(addSuccessToast('filter_updated'));
             dispatch(getUpstreamDNSFilesStatus());
         } catch (error) {
             dispatch(addErrorToast({ error }));
@@ -320,9 +320,9 @@ export const refreshUpstreamDNSFiles = () => async (dispatch: any) => {
         dispatch(refreshUpstreamDNSFilesSuccess());
 
         if (updated > 0) {
-            dispatch(addSuccessToast(i18next.t('upstream_dns_files_updated', { count: updated })));
+            dispatch(addSuccessToast(i18next.t('list_updated', { count: updated })));
         } else {
-            dispatch(addSuccessToast('upstream_dns_files_up_to_date_toast'));
+            dispatch(addSuccessToast('all_lists_up_to_date_toast'));
         }
 
         dispatch(getUpstreamDNSFilesStatus());
