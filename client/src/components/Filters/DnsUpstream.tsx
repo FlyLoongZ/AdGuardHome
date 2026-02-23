@@ -134,7 +134,7 @@ class DnsUpstream extends Component<DnsUpstreamProps> {
                                     handleAdd={() => this.props.toggleFilteringModal({ type: MODAL_TYPE.ADD_FILTERS })}
                                     handleRefresh={this.handleRefresh}
                                     processingRefreshFilters={processingRefreshUpstreamDNSFiles}
-                                    addButtonText="add_upstream_dns_file"
+                                    addButtonText="add_custom_list"
                                 />
                             </Card>
                         </div>
