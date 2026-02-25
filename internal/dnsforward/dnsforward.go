@@ -970,6 +970,16 @@ func (s *Server) ReloadUpstreams(ctx context.Context) (err error) {
 
 	s.logger.InfoContext(ctx, "reloading upstream dns configuration")
 
+	// Prepare all new upstream-related state first.  This keeps the currently
+	// running proxy intact in case the new upstream configuration is invalid.
+	//
+	// NOTE:  We can't start the new proxy without stopping the current one,
+	// because both will try to bind the same listen addresses.
+	st, err := s.prepareUpstreamReloadState(ctx)
+	if err != nil {
+		return err
+	}
+
 	if s.dnsProxy != nil {
 		err = s.dnsProxy.Shutdown(ctx)
 		if err != nil {
@@ -983,15 +993,16 @@ func (s *Server) ReloadUpstreams(ctx context.Context) (err error) {
 
 	s.isRunning = false
 
-	// Don't stop the whole server using stopLocked, since it closes the
-	// bootstrap resolvers which are still needed for loading upstreams.
-	err = s.rebuildPrimaryProxyLocked(ctx)
-	if err != nil {
-		return err
-	}
+	s.conf.UpstreamConfig = st.mainUC
+	s.conf.PrivateRDNSUpstreamConfig = st.privateUC
+	s.internalProxy = st.internalProxy
+	s.dnsProxy = st.dnsProxy
+	s.conf.ClientsContainer.UpdateCommonUpstreamConfig(st.commonUpstreamConf)
 
-	err = s.startLocked(ctx)
+	err = s.reloadUpstreamsStartWithRetry(ctx, s.logger, 3)
 	if err != nil {
+		// Keep the new configuration in place, so that the caller may attempt to
+		// start or reload again.
 		return fmt.Errorf("starting dns server: %w", err)
 	}
 
