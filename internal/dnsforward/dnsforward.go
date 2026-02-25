@@ -949,20 +949,59 @@ func (s *Server) ReloadUpstreams(ctx context.Context) (err error) {
 
 	s.logger.InfoContext(ctx, "reloading upstream dns configuration")
 
-	err = s.restartLocked(ctx, func() error {
-		if s.addrProc != nil {
-			closeErr := s.addrProc.Close()
-			if closeErr != nil {
-				s.logger.ErrorContext(ctx, "closing address processor", slogutil.KeyError, closeErr)
-			}
+	if s.dnsProxy != nil {
+		err = s.dnsProxy.Shutdown(ctx)
+		if err != nil {
+			s.logger.ErrorContext(ctx, "closing primary resolvers", slogutil.KeyError, err)
 		}
 
-		// TODO(e.burkov):  It seems an error here brings the server down, which
-		// is not reliable enough.
-		return s.Prepare(ctx, &s.conf)
-	})
+		// It seems that net.Listener.Close() doesn't close file descriptors
+		// right away.  We wait for some time and hope that these fds are closed.
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	s.isRunning = false
+
+	// Re-prepare upstream settings with the current bootstrap resolver.  Don't
+	// stop the whole server using stopLocked, since it closes the bootstrap
+	// resolvers which are still needed for loading upstreams.
+	err = s.prepareUpstreamSettings(ctx, s.bootstrap)
 	if err != nil {
-		return fmt.Errorf("restarting dns server: %w", err)
+		return fmt.Errorf("preparing upstream settings: %w", err)
+	}
+
+	s.conf.PrivateRDNSUpstreamConfig, err = s.prepareLocalResolvers(ctx)
+	if err != nil {
+		return fmt.Errorf("preparing local resolvers: %w", err)
+	}
+
+	err = s.prepareInternalProxy()
+	if err != nil {
+		return fmt.Errorf("preparing internal proxy: %w", err)
+	}
+
+	var proxyConfig *proxy.Config
+	proxyConfig, err = s.newProxyConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("preparing proxy config: %w", err)
+	}
+
+	proxyConfig.Fallbacks, err = s.setupFallbackDNS()
+	if err != nil {
+		return fmt.Errorf("setting up fallback dns servers: %w", err)
+	}
+
+	var dnsProxy *proxy.Proxy
+	dnsProxy, err = proxy.New(proxyConfig)
+	if err != nil {
+		return fmt.Errorf("creating proxy: %w", err)
+	}
+
+	s.dnsProxy = dnsProxy
+
+	err = s.startLocked(ctx)
+	if err != nil {
+		return fmt.Errorf("starting dns server: %w", err)
 	}
 
 	s.logger.InfoContext(ctx, "upstream dns configuration reloaded successfully")
