@@ -266,14 +266,16 @@ func (d *DNSFilter) tryRefreshFilters(
 	if ok = d.refreshLock.TryLock(); !ok {
 		return 0, false, false
 	}
-	defer d.refreshLock.Unlock()
 
 	ctx := context.TODO()
 	upstreamUpdated := 0
 	upstreamNetErr := false
+	shouldNotifyUpstream := false
 
 	defer func() {
-		if !upstream || upstreamNetErr || upstreamUpdated == 0 {
+		d.refreshLock.Unlock()
+
+		if !shouldNotifyUpstream {
 			return
 		}
 
@@ -292,6 +294,8 @@ func (d *DNSFilter) tryRefreshFilters(
 		if !block && !allow {
 			isNetworkErr = upstreamNetErr
 		}
+
+		shouldNotifyUpstream = !upstreamNetErr && upstreamUpdated > 0
 	}
 
 	return updated, isNetworkErr, ok
