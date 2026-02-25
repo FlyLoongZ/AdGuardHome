@@ -427,6 +427,7 @@ func setupDNSFilteringConf(
 	conf.Filters = slices.Clone(config.Filters)
 	conf.WhitelistFilters = slices.Clone(config.WhitelistFilters)
 	conf.UserRules = slices.Clone(config.UserRules)
+	conf.UpstreamDNSFiles = slices.Clone(config.UpstreamDNSFiles)
 	conf.HTTPClient = httpClient(tlsMgr)
 
 	cacheTime := time.Duration(conf.CacheTime) * time.Minute

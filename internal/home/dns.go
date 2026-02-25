@@ -100,8 +100,7 @@ func initDNS(
 		return fmt.Errorf("init querylog: %w", err)
 	}
 
-	// Set UpstreamDNSFiles from config
-	config.Filtering.UpstreamDNSFiles = config.UpstreamDNSFiles
+	// UpstreamDNSFiles are already set in setupDNSFilteringConf.
 	config.Filtering.OnUpstreamDNSFilesUpdated = func() {
 		if globalContext.dnsServer == nil {
 			return
