@@ -949,14 +949,17 @@ func (s *Server) ReloadUpstreams(ctx context.Context) (err error) {
 
 	s.logger.InfoContext(ctx, "reloading upstream dns configuration")
 
-	// Re-prepare upstream settings with the current bootstrap resolver
-	err = s.prepareUpstreamSettings(ctx, s.bootstrap)
-	if err != nil {
-		return fmt.Errorf("preparing upstream settings: %w", err)
-	}
-
 	err = s.restartLocked(ctx, func() error {
-		return s.rebuildProxyLocked(ctx)
+		if s.addrProc != nil {
+			closeErr := s.addrProc.Close()
+			if closeErr != nil {
+				s.logger.ErrorContext(ctx, "closing address processor", slogutil.KeyError, closeErr)
+			}
+		}
+
+		// TODO(e.burkov):  It seems an error here brings the server down, which
+		// is not reliable enough.
+		return s.Prepare(ctx, &s.conf)
 	})
 	if err != nil {
 		return fmt.Errorf("restarting dns server: %w", err)
