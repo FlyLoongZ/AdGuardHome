@@ -1074,9 +1074,7 @@ func New(c *Config, blockFilters []Filter) (d *DNSFilter, err error) {
 	d.conf.WhitelistFilters = deduplicateFilters(d.conf.WhitelistFilters)
 	d.conf.UpstreamDNSFiles = deduplicateFilters(d.conf.UpstreamDNSFiles)
 
-	d.idGen.fix(d.conf.Filters)
-	d.idGen.fix(d.conf.WhitelistFilters)
-	d.idGen.fix(d.conf.UpstreamDNSFiles)
+	d.idGen.fixAll(d.conf.Filters, d.conf.WhitelistFilters, d.conf.UpstreamDNSFiles)
 
 	return d, nil
 }

@@ -76,3 +76,40 @@ func (g *idGenerator) fix(flts []FilterYAML) {
 		set.Add(newID)
 	}
 }
+
+// fixAll ensures that all lists in flts have unique IDs across all slices.
+func (g *idGenerator) fixAll(flts ...[]FilterYAML) {
+	set := container.NewMapSet[rules.ListID]()
+
+	for _, lists := range flts {
+		for i, f := range lists {
+			id := f.ID
+			if id == 0 {
+				id = g.next()
+				lists[i].ID = id
+			}
+
+			if !set.Has(id) {
+				set.Add(id)
+
+				continue
+			}
+
+			newID := g.next()
+			for set.Has(newID) {
+				newID = g.next()
+			}
+
+			g.logger.WarnContext(
+				context.TODO(),
+				"filter has duplicate id; reassigning",
+				"idx", i,
+				"id", id,
+				"new_id", newID,
+			)
+
+			lists[i].ID = newID
+			set.Add(newID)
+		}
+	}
+}
