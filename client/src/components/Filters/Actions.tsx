@@ -9,20 +9,27 @@ interface ActionsProps {
     addButtonText?: string;
 }
 
-const Actions = ({ handleAdd, handleRefresh, processingRefreshFilters, whitelist, addButtonText }: ActionsProps) => (
-    <div className="card-actions">
-        <button className="btn btn-success btn-standard mr-2 btn-large mb-2" type="submit" onClick={handleAdd}>
-            {addButtonText ? <Trans>{addButtonText}</Trans> : whitelist ? <Trans>add_allowlist</Trans> : <Trans>add_blocklist</Trans>}
-        </button>
+const Actions = ({ handleAdd, handleRefresh, processingRefreshFilters, whitelist, addButtonText }: ActionsProps) => {
+    let addTextKey = whitelist ? 'add_allowlist' : 'add_blocklist';
+    if (addButtonText) {
+        addTextKey = addButtonText;
+    }
 
-        <button
-            className="btn btn-primary btn-standard mb-2"
-            type="submit"
-            onClick={handleRefresh}
-            disabled={processingRefreshFilters}>
-            <Trans>check_updates_btn</Trans>
-        </button>
-    </div>
-);
+    return (
+        <div className="card-actions">
+            <button className="btn btn-success btn-standard mr-2 btn-large mb-2" type="submit" onClick={handleAdd}>
+                <Trans>{addTextKey}</Trans>
+            </button>
+
+            <button
+                className="btn btn-primary btn-standard mb-2"
+                type="submit"
+                onClick={handleRefresh}
+                disabled={processingRefreshFilters}>
+                <Trans>check_updates_btn</Trans>
+            </button>
+        </div>
+    );
+};
 
 export default withTranslation()(Actions);

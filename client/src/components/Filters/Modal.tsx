@@ -65,6 +65,8 @@ interface ModalProps {
     whitelist?: boolean;
     filters: unknown[];
     filtersCatalog?: any;
+    title?: string;
+    description?: string;
 }
 
 class Modal extends Component<ModalProps> {
@@ -94,6 +96,13 @@ class Modal extends Component<ModalProps> {
                 initialValues = currentFilterData;
                 break;
             case MODAL_TYPE.CHOOSE_FILTERING_LIST: {
+                if (!filtersCatalog?.filters) {
+                    initialValues = {};
+                    selectedSources = {};
+
+                    break;
+                }
+
                 const catalogSourcesToIdMap = getMap(Object.values(filtersCatalog.filters), 'source', 'id');
 
                 const selectedValues = getSelectedValues(filters, catalogSourcesToIdMap);
@@ -105,7 +114,9 @@ class Modal extends Component<ModalProps> {
                 break;
         }
 
-        const title = t(getTitle(modalType, whitelist));
+        const computedTitleKey = getTitle(modalType, whitelist);
+        const computedTitle = computedTitleKey ? t(computedTitleKey) : '';
+        const title = this.props.title ?? computedTitle;
 
         return (
             <ReactModal
@@ -131,6 +142,7 @@ class Modal extends Component<ModalProps> {
                         processingConfigFilter={processingConfigFilter}
                         closeModal={this.closeModal}
                         whitelist={whitelist}
+                        description={this.props.description}
                         toggleFilteringModal={toggleFilteringModal}
                     />
                 </div>

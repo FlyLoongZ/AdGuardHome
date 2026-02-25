@@ -26,6 +26,7 @@ type Props = {
     processingAddFilter: boolean;
     processingConfigFilter: boolean;
     whitelist?: boolean;
+    description?: string;
     modalType: string;
     toggleFilteringModal: ({ type }: { type?: keyof typeof MODAL_TYPE }) => void;
     selectedSources?: Record<string, boolean>;
@@ -37,6 +38,7 @@ export const Form = ({
     processingAddFilter,
     processingConfigFilter,
     whitelist,
+    description,
     modalType,
     toggleFilteringModal,
     selectedSources,
@@ -125,7 +127,7 @@ export const Form = ({
                             </div>
 
                             <div className="form__description">
-                                {whitelist ? t('enter_valid_allowlist') : t('enter_valid_blocklist')}
+                                {description ?? (whitelist ? t('enter_valid_allowlist') : t('enter_valid_blocklist'))}
                             </div>
                         </>
                     )}

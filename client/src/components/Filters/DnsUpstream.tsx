@@ -11,7 +11,6 @@ import { MODAL_TYPE } from '../../helpers/constants';
 
 import { getCurrentFilter } from '../../helpers/helpers';
 
-import filtersCatalog from '../../helpers/filters/filters';
 import { FilteringData } from '../../initialState';
 
 interface DnsUpstreamProps {
@@ -44,23 +43,6 @@ class DnsUpstream extends Component<DnsUpstreamProps> {
                 this.props.addUpstreamDNSFile(url, name);
                 break;
             }
-            case MODAL_TYPE.CHOOSE_FILTERING_LIST: {
-                const changedValues = Object.entries(values)?.reduce((acc: any, [key, value]) => {
-                    if (value && key in filtersCatalog.filters) {
-                        acc[key] = value;
-                    }
-                    return acc;
-                }, {});
-
-                Object.keys(changedValues).forEach((fieldName) => {
-                    // filterId is actually in the field name
-
-                    const { source, name } = filtersCatalog.filters[fieldName];
-
-                    this.props.addUpstreamDNSFile(source, name);
-                });
-                break;
-            }
             default:
                 break;
         }
@@ -78,10 +60,6 @@ class DnsUpstream extends Component<DnsUpstreamProps> {
 
     handleRefresh = () => {
         this.props.refreshUpstreamDNSFiles();
-    };
-
-    openSelectTypeModal = () => {
-        this.props.toggleFilteringModal({ type: MODAL_TYPE.SELECT_MODAL_TYPE });
     };
 
     render() {
@@ -128,6 +106,7 @@ class DnsUpstream extends Component<DnsUpstreamProps> {
                                     toggleFilteringModal={toggleFilteringModal}
                                     handleDelete={this.handleDelete}
                                     toggleFilter={this.toggleFilter}
+                                    noDataText={t('no_upstreams_data_found')}
                                 />
 
                                 <Actions
@@ -142,7 +121,6 @@ class DnsUpstream extends Component<DnsUpstreamProps> {
                 </div>
 
                 <Modal
-                    filtersCatalog={filtersCatalog}
                     filters={upstreamDNSFiles}
                     isOpen={isModalOpen}
                     toggleFilteringModal={toggleFilteringModal}
@@ -153,6 +131,8 @@ class DnsUpstream extends Component<DnsUpstreamProps> {
                     handleSubmit={this.handleSubmit}
                     modalType={modalType}
                     currentFilterData={currentFilterData}
+                    title={t('dns_upstream_files')}
+                    description={t('dns_upstream_files_hint')}
                 />
             </>
         );

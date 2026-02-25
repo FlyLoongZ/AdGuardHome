@@ -21,6 +21,7 @@ interface TableProps {
     toggleFilter: (...args: unknown[]) => unknown;
     t: (...args: unknown[]) => string;
     whitelist?: boolean;
+    noDataText?: string;
 }
 
 class Table extends Component<TableProps> {
@@ -138,7 +139,7 @@ class Table extends Component<TableProps> {
     ];
 
     render() {
-        const { loading, filters, t, whitelist } = this.props;
+        const { loading, filters, t, whitelist, noDataText } = this.props;
 
         const localStorageKey = whitelist
             ? LOCAL_STORAGE_KEYS.ALLOWLIST_PAGE_SIZE
@@ -159,7 +160,7 @@ class Table extends Component<TableProps> {
                 pageText={t('page_table_footer_text')}
                 rowsText={t('rows_table_footer_text')}
                 loadingText={t('loading_table_status')}
-                noDataText={whitelist ? t('no_whitelist_added') : t('no_blocklist_added')}
+                noDataText={noDataText ?? (whitelist ? t('no_whitelist_added') : t('no_blocklist_added'))}
             />
         );
     }
