@@ -348,9 +348,6 @@ func (d *DNSFilter) handleUpstreamDNSSetURL(w http.ResponseWriter, r *http.Reque
 	}
 }
 
-// upstreamDNSRefreshReq is the request body for refreshing upstream DNS files.
-type upstreamDNSRefreshReq struct{}
-
 // handleUpstreamDNSRefresh handles requests to POST /control/upstream_dns/refresh.
 func (d *DNSFilter) handleUpstreamDNSRefresh(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()

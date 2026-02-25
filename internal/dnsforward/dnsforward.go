@@ -916,13 +916,34 @@ func (s *Server) restartLocked(ctx context.Context, prepare func() error) (err e
 	return s.startLocked(ctx)
 }
 
-// rebuildProxyLocked creates a new proxy and assigns it to the server.
-// s.serverLock is expected to be locked.
-func (s *Server) rebuildProxyLocked(ctx context.Context) (err error) {
+// rebuildPrimaryProxyLocked rebuilds the primary DNS proxy (s.dnsProxy) using
+// the currently configured upstream settings.  It assumes that s.serverLock is
+// locked.
+func (s *Server) rebuildPrimaryProxyLocked(ctx context.Context) (err error) {
+	err = s.prepareUpstreamSettings(ctx, s.bootstrap)
+	if err != nil {
+		return fmt.Errorf("preparing upstream settings: %w", err)
+	}
+
+	s.conf.PrivateRDNSUpstreamConfig, err = s.prepareLocalResolvers(ctx)
+	if err != nil {
+		return fmt.Errorf("preparing local resolvers: %w", err)
+	}
+
+	err = s.prepareInternalProxy()
+	if err != nil {
+		return fmt.Errorf("preparing internal proxy: %w", err)
+	}
+
 	var proxyConfig *proxy.Config
 	proxyConfig, err = s.newProxyConfig(ctx)
 	if err != nil {
 		return fmt.Errorf("preparing proxy config: %w", err)
+	}
+
+	proxyConfig.Fallbacks, err = s.setupFallbackDNS()
+	if err != nil {
+		return fmt.Errorf("setting up fallback dns servers: %w", err)
 	}
 
 	var dnsProxy *proxy.Proxy
@@ -962,42 +983,12 @@ func (s *Server) ReloadUpstreams(ctx context.Context) (err error) {
 
 	s.isRunning = false
 
-	// Re-prepare upstream settings with the current bootstrap resolver.  Don't
-	// stop the whole server using stopLocked, since it closes the bootstrap
-	// resolvers which are still needed for loading upstreams.
-	err = s.prepareUpstreamSettings(ctx, s.bootstrap)
+	// Don't stop the whole server using stopLocked, since it closes the
+	// bootstrap resolvers which are still needed for loading upstreams.
+	err = s.rebuildPrimaryProxyLocked(ctx)
 	if err != nil {
-		return fmt.Errorf("preparing upstream settings: %w", err)
+		return err
 	}
-
-	s.conf.PrivateRDNSUpstreamConfig, err = s.prepareLocalResolvers(ctx)
-	if err != nil {
-		return fmt.Errorf("preparing local resolvers: %w", err)
-	}
-
-	err = s.prepareInternalProxy()
-	if err != nil {
-		return fmt.Errorf("preparing internal proxy: %w", err)
-	}
-
-	var proxyConfig *proxy.Config
-	proxyConfig, err = s.newProxyConfig(ctx)
-	if err != nil {
-		return fmt.Errorf("preparing proxy config: %w", err)
-	}
-
-	proxyConfig.Fallbacks, err = s.setupFallbackDNS()
-	if err != nil {
-		return fmt.Errorf("setting up fallback dns servers: %w", err)
-	}
-
-	var dnsProxy *proxy.Proxy
-	dnsProxy, err = proxy.New(proxyConfig)
-	if err != nil {
-		return fmt.Errorf("creating proxy: %w", err)
-	}
-
-	s.dnsProxy = dnsProxy
 
 	err = s.startLocked(ctx)
 	if err != nil {
