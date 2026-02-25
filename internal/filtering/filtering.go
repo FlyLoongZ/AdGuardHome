@@ -115,6 +115,11 @@ type Config struct {
 	// HTTPClient is the client to use for updating the remote filters.
 	HTTPClient *http.Client `yaml:"-"`
 
+	// OnUpstreamDNSFilesUpdated is called when upstream DNS files are updated.
+	// It is used to notify other modules (e.g. the DNS server) to reload the
+	// upstream configuration.
+	OnUpstreamDNSFilesUpdated func() `yaml:"-"`
+
 	// filtersMu protects filter lists.
 	filtersMu *sync.RWMutex
 
@@ -280,10 +285,6 @@ type DNSFilter struct {
 	// import cycle into account.
 	applyClientFiltering func(clientID string, cliAddr netip.Addr, setts *Settings)
 
-	// onUpstreamDNSFilesUpdated is called when upstream DNS files are updated.
-	// It is used to notify the DNS server to reload the upstream configuration.
-	onUpstreamDNSFilesUpdated func()
-
 	engineLock sync.RWMutex
 
 	// confMu protects conf.
@@ -323,15 +324,9 @@ func (d *DNSFilter) SetEnabled(enabled bool) {
 	atomic.StoreUint32(&d.conf.enabled, mathutil.BoolToNumber[uint32](enabled))
 }
 
-// SetOnUpstreamDNSFilesUpdated sets the callback function that is called when
-// upstream DNS files are updated.
-func (d *DNSFilter) SetOnUpstreamDNSFilesUpdated(f func()) {
-	d.onUpstreamDNSFilesUpdated = f
-}
-
 // notifyUpstreamDNSFilesUpdated notifies the DNS server to reload upstreams.
 func (d *DNSFilter) notifyUpstreamDNSFilesUpdated(ctx context.Context, msg string) {
-	callback := d.onUpstreamDNSFilesUpdated
+	callback := d.conf.OnUpstreamDNSFilesUpdated
 	if callback == nil {
 		return
 	}

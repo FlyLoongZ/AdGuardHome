@@ -102,6 +102,23 @@ func initDNS(
 
 	// Set UpstreamDNSFiles from config
 	config.Filtering.UpstreamDNSFiles = config.UpstreamDNSFiles
+	config.Filtering.OnUpstreamDNSFilesUpdated = func() {
+		if globalContext.dnsServer == nil {
+			return
+		}
+
+		// Use a background context for the reload operation.
+		reloadCtx := context.Background()
+		err := globalContext.dnsServer.ReloadUpstreams(reloadCtx)
+		if err != nil {
+			baseLogger.ErrorContext(
+				reloadCtx,
+				"failed to reload upstreams after file update",
+				slogutil.KeyError,
+				err,
+			)
+		}
+	}
 
 	globalContext.filters, err = filtering.New(config.Filtering, nil)
 	if err != nil {
@@ -124,23 +141,6 @@ func initDNS(
 	if err != nil {
 		return err
 	}
-
-	// Set up the callback for upstream DNS files updates
-	globalContext.filters.SetOnUpstreamDNSFilesUpdated(func() {
-		if globalContext.dnsServer != nil {
-			// Use a background context for the reload operation
-			reloadCtx := context.Background()
-			err := globalContext.dnsServer.ReloadUpstreams(reloadCtx)
-			if err != nil {
-				baseLogger.ErrorContext(
-					reloadCtx,
-					"failed to reload upstreams after file update",
-					slogutil.KeyError,
-					err,
-				)
-			}
-		}
-	})
 
 	return nil
 }
