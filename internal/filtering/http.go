@@ -208,6 +208,7 @@ func (d *DNSFilter) handleFilteringRemoveURL(w http.ResponseWriter, r *http.Requ
 	}
 
 	var deleted FilterYAML
+	deletedOK := false
 	func() {
 		d.conf.filtersMu.Lock()
 		defer d.conf.filtersMu.Unlock()
@@ -247,9 +248,37 @@ func (d *DNSFilter) handleFilteringRemoveURL(w http.ResponseWriter, r *http.Requ
 		}
 
 		*filters = slices.Delete(*filters, delIdx, delIdx+1)
+		deletedOK = true
 
 		d.logger.InfoContext(ctx, "deleted filter", "id", deleted.ID)
 	}()
+
+	if !deletedOK {
+		if err != nil {
+			aghhttp.ErrorAndLog(
+				ctx,
+				d.logger,
+				r,
+				w,
+				http.StatusInternalServerError,
+				"deleting filter %q: %s",
+				req.URL,
+				err,
+			)
+		} else {
+			aghhttp.ErrorAndLog(
+				ctx,
+				d.logger,
+				r,
+				w,
+				http.StatusNotFound,
+				"filter not found: %s",
+				req.URL,
+			)
+		}
+
+		return
+	}
 
 	d.conf.ConfModifier.Apply(ctx)
 	d.EnableFilters(true)

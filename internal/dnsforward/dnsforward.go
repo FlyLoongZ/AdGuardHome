@@ -966,6 +966,25 @@ func (s *Server) ReloadUpstreams(ctx context.Context) (err error) {
 		return err
 	}
 
+	// Close the old upstream configs held by the internal proxy before
+	// replacing it.  The internal proxy is never started, so Shutdown is a
+	// no-op; close its upstream configs explicitly to avoid resource leaks on
+	// frequent upstream reloads.  These are typically the same objects as
+	// dnsProxy's configs, but close them defensively first.
+	if s.internalProxy != nil {
+		closeErr := errors.Join(
+			closeUpstreamConfig(s.internalProxy.UpstreamConfig),
+			closeUpstreamConfig(s.internalProxy.PrivateRDNSUpstreamConfig),
+		)
+		if closeErr != nil {
+			s.logger.ErrorContext(
+				ctx,
+				"closing old internal proxy upstream configs",
+				slogutil.KeyError, closeErr,
+			)
+		}
+	}
+
 	if s.dnsProxy != nil {
 		err = s.dnsProxy.Shutdown(ctx)
 		if err != nil {

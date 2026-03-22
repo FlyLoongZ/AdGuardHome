@@ -22,6 +22,7 @@ interface TableProps {
     t: (...args: unknown[]) => string;
     whitelist?: boolean;
     noDataText?: string;
+    pageSizeKey?: string;
 }
 
 class Table extends Component<TableProps> {
@@ -139,11 +140,12 @@ class Table extends Component<TableProps> {
     ];
 
     render() {
-        const { loading, filters, t, whitelist, noDataText } = this.props;
+        const { loading, filters, t, whitelist, noDataText, pageSizeKey } = this.props;
 
-        const localStorageKey = whitelist
-            ? LOCAL_STORAGE_KEYS.ALLOWLIST_PAGE_SIZE
-            : LOCAL_STORAGE_KEYS.BLOCKLIST_PAGE_SIZE;
+        const localStorageKey = pageSizeKey
+            ?? (whitelist
+                ? LOCAL_STORAGE_KEYS.ALLOWLIST_PAGE_SIZE
+                : LOCAL_STORAGE_KEYS.BLOCKLIST_PAGE_SIZE);
 
         return (
             <ReactTable

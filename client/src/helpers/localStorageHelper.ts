@@ -2,6 +2,7 @@ export const LOCAL_STORAGE_KEYS = {
     THEME: 'account_theme',
     BLOCKLIST_PAGE_SIZE: 'blocklist_page_size',
     ALLOWLIST_PAGE_SIZE: 'allowlist_page_size',
+    UPSTREAM_DNS_PAGE_SIZE: 'upstream_dns_page_size',
     CLIENTS_PAGE_SIZE: 'clients_page_size',
     REWRITES_PAGE_SIZE: 'rewrites_page_size',
     AUTO_CLIENTS_PAGE_SIZE: 'auto_clients_page_size',

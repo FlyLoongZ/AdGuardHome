@@ -263,10 +263,35 @@ func (d *DNSFilter) handleUpstreamDNSRemoveURL(w http.ResponseWriter, r *http.Re
 		d.logger.InfoContext(ctx, "deleted upstream dns file", "id", deleted.ID)
 	}()
 
-	d.conf.ConfModifier.Apply(ctx)
-	if deletedOK {
-		d.notifyUpstreamDNSFilesUpdated(ctx, "notifying dns server to reload upstreams after remove_url")
+	if !deletedOK {
+		if err != nil {
+			aghhttp.ErrorAndLog(
+				ctx,
+				d.logger,
+				r,
+				w,
+				http.StatusInternalServerError,
+				"deleting upstream dns file %q: %s",
+				req.URL,
+				err,
+			)
+		} else {
+			aghhttp.ErrorAndLog(
+				ctx,
+				d.logger,
+				r,
+				w,
+				http.StatusNotFound,
+				"upstream dns file not found: %s",
+				req.URL,
+			)
+		}
+
+		return
 	}
+
+	d.conf.ConfModifier.Apply(ctx)
+	d.notifyUpstreamDNSFilesUpdated(ctx, "notifying dns server to reload upstreams after remove_url")
 
 	_, err = fmt.Fprintf(w, "OK %d rules\n", deleted.RulesCount)
 	if err != nil {

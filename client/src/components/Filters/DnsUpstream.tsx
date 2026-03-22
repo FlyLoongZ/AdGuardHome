@@ -12,6 +12,7 @@ import { MODAL_TYPE } from '../../helpers/constants';
 import { getCurrentFilter } from '../../helpers/helpers';
 
 import { FilteringData } from '../../initialState';
+import { LOCAL_STORAGE_KEYS } from '../../helpers/localStorageHelper';
 
 interface DnsUpstreamProps {
     getUpstreamDNSFilesStatus: (...args: unknown[]) => unknown;
@@ -107,6 +108,7 @@ class DnsUpstream extends Component<DnsUpstreamProps> {
                                     handleDelete={this.handleDelete}
                                     toggleFilter={this.toggleFilter}
                                     noDataText={t('no_upstreams_data_found')}
+                                    pageSizeKey={LOCAL_STORAGE_KEYS.UPSTREAM_DNS_PAGE_SIZE}
                                 />
 
                                 <Actions
