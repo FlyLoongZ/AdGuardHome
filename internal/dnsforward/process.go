@@ -2,7 +2,6 @@ package dnsforward
 
 import (
 	"context"
-	"encoding/binary"
 	"net"
 	"net/netip"
 	"strings"
@@ -80,57 +79,6 @@ const (
 // See https://www.ietf.org/archive/id/draft-ietf-add-ddr-06.html.
 const ddrHostFQDN = "_dns.resolver.arpa."
 
-// handleDNSRequest filters the incoming DNS requests and writes them to the query log
-func (s *Server) handleDNSRequest(_ *proxy.Proxy, pctx *proxy.DNSContext) error {
-	// TODO(s.chzhen):  Pass context.
-	ctx := context.TODO()
-
-	dctx := &dnsContext{
-		proxyCtx:  pctx,
-		result:    &filtering.Result{},
-		startTime: time.Now(),
-	}
-
-	type modProcessFunc func(ctx context.Context, dctx *dnsContext) (rc resultCode)
-
-	// Since (*dnsforward.Server).handleDNSRequest(...) is used as
-	// proxy.(Config).RequestHandler, there is no need for additional index
-	// out of range checking in any of the following functions, because the
-	// (*proxy.Proxy).handleDNSRequest method performs it before calling the
-	// appropriate handler.
-	mods := []modProcessFunc{
-		s.processInitial,
-		s.processDDRQuery,
-		s.processDHCPHosts,
-		s.processDHCPAddrs,
-		s.processFilteringBeforeRequest,
-		s.processUpstream,
-		s.processFilteringAfterResponse,
-		s.ipset.process,
-		s.processQueryLogsAndStats,
-	}
-	for _, process := range mods {
-		r := process(ctx, dctx)
-		switch r {
-		case resultCodeSuccess:
-			// continue: call the next filter
-
-		case resultCodeFinish:
-			return nil
-
-		case resultCodeError:
-			return dctx.err
-		}
-	}
-
-	if pctx.Res != nil {
-		// Some devices require DNS message compression.
-		pctx.Res.Compress = true
-	}
-
-	return nil
-}
-
 // mozillaFQDN is the domain used to signal the Firefox browser to not use its
 // own DoH server.
 //
@@ -181,9 +129,10 @@ func (s *Server) processInitial(ctx context.Context, dctx *dnsContext) (rc resul
 
 	// Get the ClientID, if any, before getting client-specific filtering
 	// settings.
-	var key [8]byte
-	binary.BigEndian.PutUint64(key[:], pctx.RequestID)
-	dctx.clientID = string(s.clientIDCache.Get(key[:]))
+	clientID, ok := clientIDFromContext(ctx)
+	if ok {
+		dctx.clientID = clientID
+	}
 
 	// Get the client-specific filtering settings.
 	dctx.protectionEnabled, _ = s.UpdatedProtectionStatus(ctx)
@@ -252,7 +201,7 @@ func (s *Server) makeDDRResponse(req *dns.Msg) (resp *dns.Msg) {
 	for _, addr := range s.conf.TLSConf.HTTPSListenAddrs {
 		values := []dns.SVCBKeyValue{
 			&dns.SVCBAlpn{Alpn: []string{"h2"}},
-			&dns.SVCBPort{Port: uint16(addr.Port)},
+			&dns.SVCBPort{Port: addr.Port()},
 			&dns.SVCBDoHPath{Template: "/dns-query{?dns}"},
 		}
 
@@ -506,7 +455,7 @@ func (s *Server) processUpstream(ctx context.Context, dctx *dnsContext) (rc resu
 		return resultCodeError
 	}
 
-	if dctx.err = prx.Resolve(pctx); dctx.err != nil {
+	if dctx.err = prx.Resolve(ctx, pctx); dctx.err != nil {
 		return resultCodeError
 	}
 
