@@ -966,25 +966,25 @@ func (s *Server) ReloadUpstreams(ctx context.Context) (err error) {
 		return err
 	}
 
-	// Close the old upstream configs held by the internal proxy before
-	// replacing it.  The internal proxy is never started, so Shutdown is a
-	// no-op; close its upstream configs explicitly to avoid resource leaks on
-	// frequent upstream reloads.  These are typically the same objects as
-	// dnsProxy's configs, but close them defensively first.
-	if s.internalProxy != nil {
-		closeErr := errors.Join(
-			closeUpstreamConfig(s.internalProxy.UpstreamConfig),
-			closeUpstreamConfig(s.internalProxy.PrivateRDNSUpstreamConfig),
-		)
-		if closeErr != nil {
+	// Ensure the new upstream state is cleaned up if the reload fails.  On
+	// success, st is set to nil to prevent the deferred cleanup.
+	defer func() {
+		if st == nil {
+			return
+		}
+
+		if closeErr := st.close(); closeErr != nil {
 			s.logger.ErrorContext(
 				ctx,
-				"closing old internal proxy upstream configs",
+				"closing new upstream reload state after failure",
 				slogutil.KeyError, closeErr,
 			)
 		}
-	}
+	}()
 
+	// The old internalProxy shares the same UpstreamConfig and
+	// PrivateRDNSUpstreamConfig objects as dnsProxy, so they must only be
+	// closed once via dnsProxy.Shutdown.
 	if s.dnsProxy != nil {
 		err = s.dnsProxy.Shutdown(ctx)
 		if err != nil {
@@ -1006,10 +1006,20 @@ func (s *Server) ReloadUpstreams(ctx context.Context) (err error) {
 
 	err = s.reloadUpstreamsStartWithRetry(ctx, s.logger, 3)
 	if err != nil {
-		// Keep the new configuration in place, so that the caller may attempt to
-		// start or reload again.
+		// Start failed.  The new upstream state will be closed by the
+		// deferred st.close().  Clear the server fields first so they
+		// don't point to the about-to-be-closed objects.
+		s.conf.UpstreamConfig = nil
+		s.conf.PrivateRDNSUpstreamConfig = nil
+		s.internalProxy = nil
+		s.dnsProxy = nil
+
 		return fmt.Errorf("starting dns server: %w", err)
 	}
+
+	// Reload succeeded.  Prevent the deferred cleanup from closing the new
+	// upstream state that is now in active use.
+	st = nil
 
 	s.logger.InfoContext(ctx, "upstream dns configuration reloaded successfully")
 
