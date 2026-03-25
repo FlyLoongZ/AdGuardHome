@@ -176,6 +176,9 @@ type Server struct {
 	// conf is the current configuration of the server.
 	conf ServerConfig
 
+	// upstreamSources manages source list settings and cached contents.
+	upstreamSources *sourceManager
+
 	// serverLock protects Server.
 	serverLock sync.RWMutex
 
@@ -256,6 +259,7 @@ func NewServer(p DNSCreateParams) (s *Server, err error) {
 			ServePlainDNS: true,
 		},
 	}
+	s.upstreamSources = newSourceManager(&s.conf, s.logger)
 
 	s.sysResolvers, err = sysresolv.NewSystemResolvers(nil, defaultPlainDNSPort)
 	if err != nil {
@@ -305,6 +309,7 @@ func (s *Server) WriteDiskConfig(c *Config) {
 	c.BlockedHosts = slices.Clone(sc.BlockedHosts)
 	c.TrustedProxies = slices.Clone(sc.TrustedProxies)
 	c.UpstreamDNS = slices.Clone(sc.UpstreamDNS)
+	c.UpstreamDNSSources = slices.Clone(sc.UpstreamDNSSources)
 }
 
 // LocalPTRResolvers returns the current local PTR resolver configuration.
@@ -482,6 +487,7 @@ func (s *Server) startLocked(ctx context.Context) error {
 // nil.
 func (s *Server) Prepare(ctx context.Context, conf *ServerConfig) (err error) {
 	s.conf = *conf
+	s.upstreamSources = newSourceManager(&s.conf, s.logger)
 
 	// dnsFilter can be nil during application update.
 	if s.dnsFilter != nil {

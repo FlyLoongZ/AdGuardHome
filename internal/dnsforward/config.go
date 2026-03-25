@@ -70,6 +70,10 @@ type Config struct {
 	// DNS servers.
 	UpstreamDNSFileName string `yaml:"upstream_dns_file"`
 
+	// UpstreamDNSSources is the list of source files or URLs containing
+	// additional upstream DNS configuration lines.
+	UpstreamDNSSources []UpstreamDNSSourceYAML `yaml:"upstream_dns_sources"`
+
 	// BootstrapDNS is the list of bootstrap DNS servers for DoH and DoT
 	// resolvers (plain DNS only).
 	BootstrapDNS []string `yaml:"bootstrap_dns"`
@@ -527,7 +531,29 @@ func (conf *ServerConfig) loadUpstreams(
 	l *slog.Logger,
 ) (upstreams []string, err error) {
 	if conf.UpstreamDNSFileName == "" {
-		return stringutil.FilterOut(conf.UpstreamDNS, aghnet.IsCommentOrEmpty), nil
+		upstreams = stringutil.FilterOut(conf.UpstreamDNS, aghnet.IsCommentOrEmpty)
+
+		for _, src := range conf.UpstreamDNSSources {
+			if !src.Enabled {
+				continue
+			}
+
+			data, readErr := os.ReadFile(src.path())
+			if readErr != nil {
+				if errors.Is(readErr, os.ErrNotExist) {
+					l.WarnContext(ctx, "upstream source cache does not exist", "id", src.ID, "url", src.URL)
+
+					continue
+				}
+
+				return nil, fmt.Errorf("reading upstream source: %w", readErr)
+			}
+
+			lines := stringutil.SplitTrimmed(string(data), "\n")
+			upstreams = append(upstreams, stringutil.FilterOut(lines, aghnet.IsCommentOrEmpty)...)
+		}
+
+		return upstreams, nil
 	}
 
 	var data []byte

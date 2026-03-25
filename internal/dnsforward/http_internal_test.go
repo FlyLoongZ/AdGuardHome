@@ -144,11 +144,29 @@ func TestDNSForwardHTTP_handleGetConfig(t *testing.T) {
 			s.conf = tc.conf()
 			s.handleGetConfig(w, httptest.NewRequest(http.MethodGet, "/", nil))
 
+			var got map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+			delete(got, "upstream_dns_sources")
+
 			cType := w.Header().Get(httphdr.ContentType)
 			assert.Equal(t, aghhttp.HdrValApplicationJSON, cType)
-			assert.JSONEq(t, string(caseWant), w.Body.String())
+
+			wantMap := map[string]any{}
+			require.NoError(t, json.Unmarshal(caseWant, &wantMap))
+			assert.Equal(t, wantMap, got)
 		})
 	}
+
+	t.Run("includes_upstream_sources_field", func(t *testing.T) {
+		s.conf = defaultConf
+		w.Body.Reset()
+		s.handleGetConfig(w, httptest.NewRequest(http.MethodGet, "/", nil))
+
+		var got map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+		_, ok := got["upstream_dns_sources"]
+		require.True(t, ok)
+	})
 }
 
 func TestDNSForwardHTTP_handleSetConfig(t *testing.T) {
@@ -312,7 +330,14 @@ func TestDNSForwardHTTP_handleSetConfig(t *testing.T) {
 			w.Body.Reset()
 
 			s.handleGetConfig(w, httptest.NewRequest(http.MethodGet, "/", nil))
-			assert.JSONEq(t, string(caseData.Want), w.Body.String())
+
+			var got map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+			delete(got, "upstream_dns_sources")
+
+			wantMap := map[string]any{}
+			require.NoError(t, json.Unmarshal(caseData.Want, &wantMap))
+			assert.Equal(t, wantMap, got)
 			w.Body.Reset()
 		})
 	}
@@ -485,4 +510,175 @@ func TestServer_HandleTestUpstreamDNS(t *testing.T) {
 
 		assert.True(t, strings.HasSuffix(sleepyRes, "i/o timeout"))
 	})
+}
+
+func TestServer_UpstreamSourcesHTTP(t *testing.T) {
+	ctx := testutil.ContextWithTimeout(t, testTimeout)
+
+	tmpDir := t.TempDir()
+	t.Chdir(tmpDir)
+	localSrcPath := filepath.Join(tmpDir, "upstreams.txt")
+	err := os.WriteFile(localSrcPath, []byte("[/example.org/]1.1.1.1\n#comment\n"), 0o644)
+	require.NoError(t, err)
+
+	srv := createTestServer(t, &filtering.Config{
+		FilteringEnabled: true,
+		BlockingMode:     filtering.BlockingModeDefault,
+	}, ServerConfig{
+		Config: Config{
+			UpstreamDNS:      []string{"8.8.8.8:53"},
+			UpstreamMode:     UpstreamModeLoadBalance,
+			EDNSClientSubnet: &EDNSClientSubnet{},
+			ClientsContainer: EmptyClientsContainer{},
+		},
+		TLSConf:        &TLSConfig{},
+		ConfModifier:   agh.EmptyConfigModifier{},
+		ServePlainDNS:  true,
+		UDPListenAddrs: []*net.UDPAddr{},
+		TCPListenAddrs: []*net.TCPAddr{},
+	})
+
+	reqBody := func(v any) io.ReadCloser {
+		b, e := json.Marshal(v)
+		require.NoError(t, e)
+
+		return io.NopCloser(bytes.NewReader(b))
+	}
+
+	t.Run("add_and_status", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodPost, "/control/upstream_dns_sources/add_url", reqBody(map[string]string{
+			"name": "local",
+			"url":  localSrcPath,
+		}))
+		w := httptest.NewRecorder()
+		srv.handleUpstreamSourcesAddURL(w, r.WithContext(ctx))
+		require.Equal(t, http.StatusOK, w.Code)
+
+		r = httptest.NewRequest(http.MethodGet, "/control/upstream_dns_sources/status", nil)
+		w = httptest.NewRecorder()
+		srv.handleUpstreamSourcesStatus(w, r.WithContext(ctx))
+		require.Equal(t, http.StatusOK, w.Code)
+
+		resp := upstreamSourceStatusResp{}
+		require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+		require.Len(t, resp.Sources, 1)
+		assert.Equal(t, "local", resp.Sources[0].Name)
+		assert.Equal(t, localSrcPath, resp.Sources[0].URL)
+		assert.Equal(t, uint64(1), resp.Sources[0].RulesCount)
+	})
+
+	t.Run("duplicate", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodPost, "/control/upstream_dns_sources/add_url", reqBody(map[string]string{
+			"name": "dup",
+			"url":  localSrcPath,
+		}))
+		w := httptest.NewRecorder()
+		srv.handleUpstreamSourcesAddURL(w, r.WithContext(ctx))
+		require.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("refresh", func(t *testing.T) {
+		err = os.WriteFile(localSrcPath, []byte("[/example.org/]1.1.1.1\n[/example.net/]9.9.9.9\n"), 0o644)
+		require.NoError(t, err)
+
+		r := httptest.NewRequest(http.MethodPost, "/control/upstream_dns_sources/refresh", reqBody(map[string]any{}))
+		w := httptest.NewRecorder()
+		srv.handleUpstreamSourcesRefresh(w, r.WithContext(ctx))
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var body struct {
+			Updated int `json:"updated"`
+		}
+		require.NoError(t, json.NewDecoder(w.Body).Decode(&body))
+		assert.Equal(t, 1, body.Updated)
+	})
+
+	t.Run("set_enabled_false", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodPost, "/control/upstream_dns_sources/set_url", reqBody(map[string]any{
+			"url": localSrcPath,
+			"data": map[string]any{
+				"name":    "local-disabled",
+				"url":     localSrcPath,
+				"enabled": false,
+			},
+		}))
+		w := httptest.NewRecorder()
+		srv.handleUpstreamSourcesSetURL(w, r.WithContext(ctx))
+		require.Equal(t, http.StatusOK, w.Code)
+
+		r = httptest.NewRequest(http.MethodGet, "/control/upstream_dns_sources/status", nil)
+		w = httptest.NewRecorder()
+		srv.handleUpstreamSourcesStatus(w, r.WithContext(ctx))
+		require.Equal(t, http.StatusOK, w.Code)
+
+		resp := upstreamSourceStatusResp{}
+		require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+		require.Len(t, resp.Sources, 1)
+		assert.Equal(t, "local-disabled", resp.Sources[0].Name)
+		assert.False(t, resp.Sources[0].Enabled)
+	})
+
+	t.Run("remove", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodPost, "/control/upstream_dns_sources/remove_url", reqBody(map[string]string{
+			"url": localSrcPath,
+		}))
+		w := httptest.NewRecorder()
+		srv.handleUpstreamSourcesRemoveURL(w, r.WithContext(ctx))
+		require.Equal(t, http.StatusOK, w.Code)
+	})
+}
+
+func TestServer_HandleTestUpstreamDNS_WithSources(t *testing.T) {
+	ctx := testutil.ContextWithTimeout(t, testTimeout)
+
+	tmpDir := t.TempDir()
+	t.Chdir(tmpDir)
+	cacheDir := filepath.Join(tmpDir, "data", upstreamSourcesCacheDir)
+	require.NoError(t, os.MkdirAll(cacheDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(cacheDir, "upstream-1.txt"), []byte("[/example.org/]127.0.0.1\n"), 0o644))
+
+	srv := createTestServer(t, &filtering.Config{
+		FilteringEnabled: true,
+		BlockingMode:     filtering.BlockingModeDefault,
+	}, ServerConfig{
+		Config: Config{
+			UpstreamDNS: []string{"8.8.8.8:53"},
+			UpstreamMode: UpstreamModeLoadBalance,
+			UpstreamDNSSources: []UpstreamDNSSourceYAML{{
+				Enabled: true,
+				URL:     "https://example.test/source.txt",
+				UpstreamDNSSource: UpstreamDNSSource{
+					ID: 1,
+				},
+			}},
+			EDNSClientSubnet: &EDNSClientSubnet{},
+			ClientsContainer: EmptyClientsContainer{},
+		},
+		TLSConf:        &TLSConfig{},
+		ConfModifier:   agh.EmptyConfigModifier{},
+		ServePlainDNS:  true,
+		UDPListenAddrs: []*net.UDPAddr{},
+		TCPListenAddrs: []*net.TCPAddr{},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/control/test_upstream_dns", io.NopCloser(bytes.NewReader([]byte(`{
+		"upstream_dns": ["8.8.8.8:53"],
+		"bootstrap_dns": [],
+		"fallback_dns": [],
+		"private_upstream": []
+	}`))))
+	w := httptest.NewRecorder()
+	srv.handleTestUpstreamDNS(w, req.WithContext(ctx))
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	srv.conf.UpstreamDNSFileName = "/tmp/non-existing-upstreams-file"
+	req = httptest.NewRequest(http.MethodPost, "/control/test_upstream_dns", io.NopCloser(bytes.NewReader([]byte(`{
+		"upstream_dns": ["8.8.8.8:53"],
+		"bootstrap_dns": [],
+		"fallback_dns": [],
+		"private_upstream": []
+	}`))))
+	w = httptest.NewRecorder()
+	srv.handleTestUpstreamDNS(w, req.WithContext(ctx))
+	assert.Equal(t, http.StatusOK, w.Code)
 }

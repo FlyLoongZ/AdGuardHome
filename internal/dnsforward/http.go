@@ -36,6 +36,9 @@ type jsonDNSConfig struct {
 	// UpstreamsFile is the file containing upstream DNS servers.
 	UpstreamsFile *string `json:"upstream_dns_file"`
 
+	// UpstreamDNSSources are additional upstream DNS source URLs or paths.
+	UpstreamDNSSources *[]upstreamSourceJSON `json:"upstream_dns_sources"`
+
 	// Bootstraps is the list of DNS servers resolving IP addresses of the
 	// upstream DoH/DoT resolvers.
 	Bootstraps *[]string `json:"bootstrap_dns"`
@@ -174,6 +177,7 @@ func (s *Server) getDNSConfig(ctx context.Context) (c *jsonDNSConfig) {
 	resolveClients := s.conf.AddrProcConf.UseRDNS
 	usePrivateRDNS := s.conf.UsePrivateRDNS
 	localPTRUpstreams := stringutil.CloneSliceOrEmpty(s.conf.LocalPTRResolvers)
+	upstreamSources := slices.Clone(s.conf.UpstreamDNSSources)
 
 	var upstreamMode jsonUpstreamMode
 	switch s.conf.UpstreamMode {
@@ -195,6 +199,7 @@ func (s *Server) getDNSConfig(ctx context.Context) (c *jsonDNSConfig) {
 	return &jsonDNSConfig{
 		Upstreams:                &upstreams,
 		UpstreamsFile:            &upstreamFile,
+		UpstreamDNSSources:       ptrSlice(sourcesToJSON(upstreamSources)),
 		Bootstraps:               &bootstraps,
 		Fallbacks:                &fallbacks,
 		ProtectionEnabled:        &protectionEnabled,
@@ -225,6 +230,8 @@ func (s *Server) getDNSConfig(ctx context.Context) (c *jsonDNSConfig) {
 		DisabledUntil:            protectionDisabledUntil,
 	}
 }
+
+func ptrSlice[T any](s []T) *[]T { return &s }
 
 // defaultLocalPTRUpstreams returns the list of default local PTR resolvers
 // filtered of AdGuard Home's own DNS server addresses.  It may appear empty.
@@ -654,6 +661,7 @@ func (s *Server) setConfigRestartable(dc *jsonDNSConfig) (shouldRestart bool) {
 		setIfNotNil(&s.conf.UpstreamDNS, dc.Upstreams),
 		setIfNotNil(&s.conf.LocalPTRResolvers, dc.LocalPTRUpstreams),
 		setIfNotNil(&s.conf.UpstreamDNSFileName, dc.UpstreamsFile),
+		setIfNotNil(&s.conf.UpstreamDNSSources, ptrSourceSlice(dc.UpstreamDNSSources)),
 		setIfNotNil(&s.conf.BootstrapDNS, dc.Bootstraps),
 		setIfNotNil(&s.conf.FallbackDNS, dc.Fallbacks),
 		setIfNotNil(&s.conf.EDNSClientSubnet.Enabled, dc.EDNSCSEnabled),
@@ -728,6 +736,8 @@ func (s *Server) handleTestUpstreamDNS(w http.ResponseWriter, r *http.Request) {
 
 		return
 	}
+
+	req.Upstreams = s.appendUpstreamSourcesForTest(ctx, req.Upstreams)
 
 	req.BootstrapDNS = stringutil.FilterOut(req.BootstrapDNS, aghnet.IsCommentOrEmpty)
 
@@ -863,6 +873,11 @@ func (s *Server) registerHandlers() {
 	s.conf.HTTPReg.Register(http.MethodGet, "/control/dns_info", s.handleGetConfig)
 	s.conf.HTTPReg.Register(http.MethodPost, "/control/dns_config", s.handleSetConfig)
 	s.conf.HTTPReg.Register(http.MethodPost, "/control/test_upstream_dns", s.handleTestUpstreamDNS)
+	s.conf.HTTPReg.Register(http.MethodGet, "/control/upstream_dns_sources/status", s.handleUpstreamSourcesStatus)
+	s.conf.HTTPReg.Register(http.MethodPost, "/control/upstream_dns_sources/add_url", s.handleUpstreamSourcesAddURL)
+	s.conf.HTTPReg.Register(http.MethodPost, "/control/upstream_dns_sources/remove_url", s.handleUpstreamSourcesRemoveURL)
+	s.conf.HTTPReg.Register(http.MethodPost, "/control/upstream_dns_sources/set_url", s.handleUpstreamSourcesSetURL)
+	s.conf.HTTPReg.Register(http.MethodPost, "/control/upstream_dns_sources/refresh", s.handleUpstreamSourcesRefresh)
 	s.conf.HTTPReg.Register(http.MethodPost, "/control/protection", s.handleSetProtection)
 
 	s.conf.HTTPReg.Register(http.MethodGet, "/control/access/list", s.handleAccessList)
