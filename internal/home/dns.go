@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/AdguardTeam/AdGuardHome/internal/agh"
@@ -49,6 +50,7 @@ func initDNS(
 	tlsMgr *tlsManager,
 	confModifier agh.ConfigModifier,
 	httpReg aghhttp.Registrar,
+	workDir string,
 	statsDir string,
 	querylogDir string,
 ) (err error) {
@@ -117,6 +119,7 @@ func initDNS(
 		tlsMgr,
 		baseLogger,
 		confModifier,
+		workDir,
 	)
 }
 
@@ -137,6 +140,7 @@ func initDNSServer(
 	tlsMgr *tlsManager,
 	l *slog.Logger,
 	confModifier agh.ConfigModifier,
+	workDir string,
 ) (err error) {
 	globalContext.dnsServer, err = dnsforward.NewServer(dnsforward.DNSCreateParams{
 		Logger:      l,
@@ -168,6 +172,8 @@ func initDNSServer(
 		httpReg,
 		globalContext.clients.storage,
 		confModifier,
+		workDir,
+		config.Filtering.SafeFSPatterns,
 	)
 	if err != nil {
 		return fmt.Errorf("newServerConfig: %w", err)
@@ -260,6 +266,8 @@ func newServerConfig(
 	httpReg aghhttp.Registrar,
 	clientsContainer dnsforward.ClientsContainer,
 	confModifier agh.ConfigModifier,
+	workDir string,
+	safeFSPatterns []string,
 ) (newConf *dnsforward.ServerConfig, err error) {
 	hosts := aghalg.CoalesceSlice(dnsConf.BindHosts, []netip.Addr{netutil.IPv4Localhost()})
 
@@ -289,6 +297,8 @@ func newServerConfig(
 		UseHTTP3Upstreams:      dnsConf.UseHTTP3Upstreams,
 		ServePlainDNS:          dnsConf.ServePlainDNS,
 		PendingRequestsEnabled: dnsConf.PendingRequests.Enabled,
+		DataDir:                filepath.Join(workDir, dataDir),
+		SafeFSPatterns:         slices.Clone(safeFSPatterns),
 	}
 
 	var initialAddresses []netip.Addr

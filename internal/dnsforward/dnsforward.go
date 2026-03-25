@@ -858,6 +858,9 @@ func (s *Server) Reconfigure(ctx context.Context, conf *ServerConfig) error {
 	s.logger.InfoContext(ctx, "starting reconfiguring server")
 	defer s.logger.InfoContext(ctx, "finished reconfiguring server")
 
+	prevConf := s.conf
+	wasRunning := s.isRunning
+
 	s.stopLocked(ctx)
 
 	// It seems that net.Listener.Close() doesn't close file descriptors right
@@ -875,15 +878,41 @@ func (s *Server) Reconfigure(ctx context.Context, conf *ServerConfig) error {
 		conf = &s.conf
 	}
 
-	// TODO(e.burkov):  It seems an error here brings the server down, which is
-	// not reliable enough.
 	err := s.Prepare(ctx, conf)
 	if err != nil {
+		if wasRunning {
+			restoreErr := s.Prepare(ctx, &prevConf)
+			if restoreErr == nil {
+				restoreErr = s.startLocked(ctx)
+			}
+
+			if restoreErr != nil {
+				s.logger.ErrorContext(ctx, "restoring server after failed reconfigure", slogutil.KeyError, restoreErr)
+			}
+		} else {
+			s.conf = prevConf
+			s.upstreamSources = newSourceManager(&s.conf, s.logger)
+		}
+
 		return fmt.Errorf("could not reconfigure the server: %w", err)
 	}
 
 	err = s.startLocked(ctx)
 	if err != nil {
+		if wasRunning {
+			restoreErr := s.Prepare(ctx, &prevConf)
+			if restoreErr == nil {
+				restoreErr = s.startLocked(ctx)
+			}
+
+			if restoreErr != nil {
+				s.logger.ErrorContext(ctx, "restoring server after failed restart", slogutil.KeyError, restoreErr)
+			}
+		} else {
+			s.conf = prevConf
+			s.upstreamSources = newSourceManager(&s.conf, s.logger)
+		}
+
 		return fmt.Errorf("could not reconfigure the server: %w", err)
 	}
 

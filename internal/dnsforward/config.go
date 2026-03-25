@@ -311,6 +311,13 @@ type ServerConfig struct {
 	// PendingRequestsEnabled defines if duplicate requests should be forwarded
 	// to upstreams along with the original one.
 	PendingRequestsEnabled bool
+
+	// DataDir is used to store upstream source cache contents.
+	DataDir string
+
+	// SafeFSPatterns are the patterns for matching which local upstream source
+	// files can be added.
+	SafeFSPatterns []string
 }
 
 // UpstreamMode is a enumeration of upstream mode representations.  See
@@ -538,7 +545,7 @@ func (conf *ServerConfig) loadUpstreams(
 				continue
 			}
 
-			data, readErr := os.ReadFile(src.path())
+			data, readErr := os.ReadFile(src.path(conf.DataDir))
 			if readErr != nil {
 				if errors.Is(readErr, os.ErrNotExist) {
 					l.WarnContext(ctx, "upstream source cache does not exist", "id", src.ID, "url", src.URL)

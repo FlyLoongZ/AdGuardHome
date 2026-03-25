@@ -15,6 +15,7 @@ import (
 	"math/big"
 	"net"
 	"net/netip"
+	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -141,6 +142,9 @@ func createTestServer(
 	tb.Helper()
 
 	filterConf.Logger = cmp.Or(filterConf.Logger, testLogger)
+	if filterConf.DataDir == "" {
+		filterConf.DataDir = tb.TempDir()
+	}
 
 	rules := `||nxdomain.example.org
 ||NULL.example.org^
@@ -156,6 +160,14 @@ func createTestServer(
 
 	if filterConf.ApplyClientFiltering == nil {
 		filterConf.ApplyClientFiltering = applyEmptyClientFiltering
+	}
+
+	if forwardConf.DataDir == "" {
+		forwardConf.DataDir = filterConf.DataDir
+	}
+
+	if forwardConf.SafeFSPatterns == nil {
+		forwardConf.SafeFSPatterns = []string{filepath.Join(tb.TempDir(), "*")}
 	}
 
 	f, err := filtering.New(filterConf, filters)
@@ -494,6 +506,62 @@ func TestServer_Prepare_fallbacks(t *testing.T) {
 	require.NotNil(t, s.dnsProxy.Fallbacks)
 
 	assert.Len(t, s.dnsProxy.Fallbacks.Upstreams, 1)
+}
+
+func TestServer_Reconfigure_RollbackOnPrepareFailure(t *testing.T) {
+	s, err := NewServer(DNSCreateParams{
+		DNSFilter: createTestDNSFilter(t),
+		Logger:    testLogger,
+	})
+	require.NoError(t, err)
+
+	goodConf := &ServerConfig{
+		TLSConf: &TLSConfig{},
+		Config: Config{
+			UpstreamDNS:      []string{"8.8.8.8:53"},
+			UpstreamMode:     UpstreamModeLoadBalance,
+			EDNSClientSubnet: &EDNSClientSubnet{Enabled: false},
+			ClientsContainer: EmptyClientsContainer{},
+		},
+		ServePlainDNS: true,
+	}
+	require.NoError(t, s.Prepare(testutil.ContextWithTimeout(t, testTimeout), goodConf))
+
+	oldConf := s.conf
+	badConf := s.conf
+	badConf.UpstreamMode = UpstreamMode("bad")
+
+	err = s.Reconfigure(testutil.ContextWithTimeout(t, testTimeout), &badConf)
+	require.Error(t, err)
+	assert.False(t, s.IsRunning())
+	assert.Equal(t, oldConf.UpstreamDNS, s.conf.UpstreamDNS)
+	assert.Equal(t, oldConf.TLSConf != nil, s.conf.TLSConf != nil)
+}
+
+func TestNewSourceManager_LoadsMetadataFromCache(t *testing.T) {
+	dataDir := t.TempDir()
+	cacheDir := filepath.Join(dataDir, upstreamSourcesCacheDir)
+	require.NoError(t, os.MkdirAll(cacheDir, 0o755))
+
+	cachePath := filepath.Join(cacheDir, "upstream-1.txt")
+	require.NoError(t, os.WriteFile(cachePath, []byte("[/example.org/]1.1.1.1\n#comment\n[/example.net/]9.9.9.9\n"), 0o644))
+
+	conf := &ServerConfig{
+		DataDir:        dataDir,
+		SafeFSPatterns: []string{filepath.Join(t.TempDir(), "*")},
+		Config: Config{
+			UpstreamDNSSources: []UpstreamDNSSourceYAML{{
+				Enabled: true,
+				URL:     "https://example.test/source.txt",
+				UpstreamDNSSource: UpstreamDNSSource{ID: 1},
+			}},
+		},
+	}
+
+	_ = newSourceManager(conf, testLogger)
+	require.Equal(t, 2, conf.UpstreamDNSSources[0].RulesCount)
+	assert.False(t, conf.UpstreamDNSSources[0].LastUpdated.IsZero())
+	assert.NotZero(t, conf.UpstreamDNSSources[0].checksum)
 }
 
 func TestServerWithProtectionDisabled(t *testing.T) {

@@ -536,6 +536,8 @@ func TestServer_UpstreamSourcesHTTP(t *testing.T) {
 		ServePlainDNS:  true,
 		UDPListenAddrs: []*net.UDPAddr{},
 		TCPListenAddrs: []*net.TCPAddr{},
+		DataDir:        filepath.Join(tmpDir, "data"),
+		SafeFSPatterns: []string{filepath.Join(tmpDir, "*")},
 	})
 
 	reqBody := func(v any) io.ReadCloser {
@@ -681,4 +683,68 @@ func TestServer_HandleTestUpstreamDNS_WithSources(t *testing.T) {
 	w = httptest.NewRecorder()
 	srv.handleTestUpstreamDNS(w, req.WithContext(ctx))
 	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestServer_HandleUpstreamDNSSources_RejectsUnsafeAndInvalidContent(t *testing.T) {
+	ctx := testutil.ContextWithTimeout(t, testTimeout)
+
+	tmpDir := t.TempDir()
+	safeDir := filepath.Join(tmpDir, "safe")
+	require.NoError(t, os.MkdirAll(safeDir, 0o755))
+
+	invalidSrcPath := filepath.Join(safeDir, "invalid-upstreams.txt")
+	require.NoError(t, os.WriteFile(invalidSrcPath, []byte("udp://://bad\n"), 0o644))
+
+	unsafeSrcPath := filepath.Join(tmpDir, "unsafe-upstreams.txt")
+	require.NoError(t, os.WriteFile(unsafeSrcPath, []byte("[/example.org/]1.1.1.1\n"), 0o644))
+
+	filterDataDir := t.TempDir()
+	srv := createTestServer(t, &filtering.Config{
+		FilteringEnabled: true,
+		BlockingMode:     filtering.BlockingModeDefault,
+		DataDir:          filterDataDir,
+	}, ServerConfig{
+		Config: Config{
+			UpstreamDNS:      []string{"8.8.8.8:53"},
+			UpstreamMode:     UpstreamModeLoadBalance,
+			EDNSClientSubnet: &EDNSClientSubnet{},
+			ClientsContainer: EmptyClientsContainer{},
+		},
+		TLSConf:         &TLSConfig{},
+		ConfModifier:    agh.EmptyConfigModifier{},
+		ServePlainDNS:   true,
+		UDPListenAddrs:  []*net.UDPAddr{},
+		TCPListenAddrs:  []*net.TCPAddr{},
+		DataDir:         filterDataDir,
+		SafeFSPatterns:  []string{filepath.Join(safeDir, "*")},
+	})
+
+	reqBody := func(v any) io.ReadCloser {
+		b, e := json.Marshal(v)
+		require.NoError(t, e)
+
+		return io.NopCloser(bytes.NewReader(b))
+	}
+
+	t.Run("invalid_rules", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodPost, "/control/upstream_dns_sources/add_url", reqBody(map[string]string{
+			"name": "invalid",
+			"url":  invalidSrcPath,
+		}))
+		w := httptest.NewRecorder()
+		srv.handleUpstreamSourcesAddURL(w, r.WithContext(ctx))
+		require.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Empty(t, srv.upstreamSources.all())
+	})
+
+	t.Run("unsafe_path", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodPost, "/control/upstream_dns_sources/add_url", reqBody(map[string]string{
+			"name": "unsafe",
+			"url":  unsafeSrcPath,
+		}))
+		w := httptest.NewRecorder()
+		srv.handleUpstreamSourcesAddURL(w, r.WithContext(ctx))
+		require.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Empty(t, srv.upstreamSources.all())
+	})
 }

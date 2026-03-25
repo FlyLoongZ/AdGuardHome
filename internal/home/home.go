@@ -853,7 +853,7 @@ func runDNSServer(
 	querylogDir string,
 	httpReg *aghhttp.DefaultRegistrar,
 ) {
-	err := initDNS(ctx, slogLogger, tlsMgr, confModifier, httpReg, statsDir, querylogDir)
+	err := initDNS(ctx, slogLogger, tlsMgr, confModifier, httpReg, confModifier.workDir, statsDir, querylogDir)
 	fatalOnError(err)
 
 	tlsMgr.start(ctx)
@@ -1352,7 +1352,7 @@ func cmdlineUpdate(
 	//
 	// TODO(e.burkov):  We could probably initialize the internal resolver
 	// separately.
-	err := initDNSServer(ctx, nil, nil, nil, nil, nil, nil, tlsMgr, l, agh.EmptyConfigModifier{})
+	err := initDNSServer(ctx, nil, nil, nil, nil, nil, nil, tlsMgr, l, agh.EmptyConfigModifier{}, opts.workDir)
 	fatalOnError(err)
 
 	l.InfoContext(ctx, "performing update via cli")
