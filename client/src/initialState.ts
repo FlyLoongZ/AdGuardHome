@@ -336,6 +336,26 @@ export type DnsConfigData = {
     cache_optimistic?: boolean;
 };
 
+export type UpstreamDnsSourceData = {
+    enabled: boolean;
+    id: number;
+    lastUpdated: string;
+    name: string;
+    rulesCount: number;
+    url: string;
+};
+
+export type UpstreamDnsSourcesData = {
+    processing: boolean;
+    processingAdd: boolean;
+    processingRemove: boolean;
+    processingSet: boolean;
+    processingRefresh: boolean;
+    isModalOpen: boolean;
+    selectedSourceUrl: string;
+    sources: UpstreamDnsSourceData[];
+};
+
 export type FilteringData = {
     isModalOpen: boolean;
     processingFilters: boolean;
@@ -398,6 +418,7 @@ export type RootState = {
     services?: ServicesData;
     settings?: SettingsData;
     stats?: StatsData;
+    upstreamDnsSources?: UpstreamDnsSourcesData;
     install?: InstallData;
     toasts: { notices: any[] };
     loadingBar: any;
@@ -514,6 +535,16 @@ export const initialState: RootState = {
         resolve_clients: false,
         use_private_ptr_resolvers: false,
         default_local_ptr_upstreams: [],
+    },
+    upstreamDnsSources: {
+        processing: false,
+        processingAdd: false,
+        processingRemove: false,
+        processingSet: false,
+        processingRefresh: false,
+        isModalOpen: false,
+        selectedSourceUrl: '',
+        sources: [],
     },
     encryption: {
         processing: true,
