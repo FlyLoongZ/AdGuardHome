@@ -84,7 +84,7 @@ func (s *UpstreamDNSSourceYAML) clone() (clone UpstreamDNSSourceYAML) {
 }
 
 // sourceReader returns an io.ReadCloser for the source URL or absolute file path.
-func sourceReader(httpClient *http.Client, srcURL string, safeFSPatterns []string) (r io.ReadCloser, err error) {
+func sourceReader(ctx context.Context, httpClient *http.Client, srcURL string, safeFSPatterns []string) (r io.ReadCloser, err error) {
 	if filepath.IsAbs(srcURL) {
 		path := filepath.Clean(srcURL)
 		if !pathMatchesAny(safeFSPatterns, path) {
@@ -108,7 +108,12 @@ func sourceReader(httpClient *http.Client, srcURL string, safeFSPatterns []strin
 		return nil, fmt.Errorf("unsupported scheme %q", u.Scheme)
 	}
 
-	resp, err := httpClient.Get(srcURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srcURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -149,12 +154,24 @@ func pathMatchesAny(globs []string, filePath string) (ok bool) {
 }
 
 type sourcePrepared struct {
-	tmpPath     string
-	count       int
-	checksum    uint32
-	name        string
-	lastUpdated time.Time
+	tmpPath       string
+	count         int
+	checksum      uint32
+	prevChecksum  uint32
+	name          string
+	lastUpdated   time.Time
 	upstreamLines []string
+}
+
+type sourceStageResult struct {
+	staged           []UpstreamDNSSourceYAML
+	prepared         []sourcePrepared
+	requiresRestart  bool
+	hadContentChange bool
+	updated          int
+	warnings         []error
+	added            UpstreamDNSSourceYAML
+	removed          UpstreamDNSSourceYAML
 }
 
 // sourceManager manages upstream DNS source lists and their cached contents.
@@ -168,10 +185,15 @@ type sourceManager struct {
 }
 
 func newSourceManager(conf *ServerConfig, l *slog.Logger) *sourceManager {
+	httpClient := http.DefaultClient
+	if conf != nil && conf.HTTPClient != nil {
+		httpClient = conf.HTTPClient
+	}
+
 	sm := &sourceManager{
 		conf:       conf,
 		logger:     l,
-		httpClient: http.DefaultClient,
+		httpClient: httpClient,
 		mu:         &sync.RWMutex{},
 	}
 
@@ -255,7 +277,7 @@ func (m *sourceManager) prepare(ctx context.Context, src UpstreamDNSSourceYAML) 
 		return p, fmt.Errorf("creating cache dir: %w", err)
 	}
 
-	r, err := sourceReader(m.httpClient, src.URL, m.conf.SafeFSPatterns)
+	r, err := sourceReader(ctx, m.httpClient, src.URL, m.conf.SafeFSPatterns)
 	if err != nil {
 		return p, err
 	}
@@ -336,8 +358,6 @@ func (m *sourceManager) prepare(ctx context.Context, src UpstreamDNSSourceYAML) 
 	v := h.Sum64()
 	checksum := binary.LittleEndian.Uint32([]byte{byte(v), byte(v >> 8), byte(v >> 16), byte(v >> 24)})
 
-	_ = ctx
-
 	p = sourcePrepared{
 		tmpPath:       tmpFile.Name(),
 		count:         lineCount,
@@ -353,12 +373,17 @@ func (m *sourceManager) prepare(ctx context.Context, src UpstreamDNSSourceYAML) 
 func (m *sourceManager) commit(src *UpstreamDNSSourceYAML, p sourcePrepared) (updated bool, err error) {
 	dst := src.path(m.conf.DataDir)
 
-	if p.checksum == src.checksum {
-		_ = os.Remove(p.tmpPath)
+	if p.checksum == p.prevChecksum {
+		_, statErr := os.Stat(dst)
+		if statErr == nil {
+			_ = os.Remove(p.tmpPath)
 
-		src.LastUpdated = p.lastUpdated
+			src.LastUpdated = p.lastUpdated
 
-		return false, nil
+			return false, nil
+		} else if !stderrors.Is(statErr, os.ErrNotExist) {
+			return false, fmt.Errorf("checking source cache: %w", statErr)
+		}
 	}
 
 	err = os.Rename(p.tmpPath, dst)
@@ -457,30 +482,7 @@ func (m *sourceManager) cloneSources() (sources []UpstreamDNSSourceYAML) {
 	return sources
 }
 
-func (m *sourceManager) withStagedLocked(
-	ctx context.Context,
-	mutate func(sources []UpstreamDNSSourceYAML, nextID uint64) (staged []UpstreamDNSSourceYAML, prepared []sourcePrepared, newNextID uint64, out any, err error),
-) (staged []UpstreamDNSSourceYAML, prepared []sourcePrepared, out any, err error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	var newNextID uint64
-	staged, prepared, newNextID, out, err = mutate(m.cloneSources(), m.nextID)
-	if err != nil {
-		m.cleanupPrepared(prepared)
-
-		return nil, nil, nil, err
-	}
-
-	m.nextID = newNextID
-
-	return staged, prepared, out, nil
-}
-
-func (m *sourceManager) applyLocked(staged []UpstreamDNSSourceYAML, prepared []sourcePrepared) (err error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
+func (m *sourceManager) applyPreparedLocked(staged []UpstreamDNSSourceYAML, prepared []sourcePrepared) (err error) {
 	for i := range prepared {
 		if prepared[i].tmpPath == "" {
 			continue
@@ -520,180 +522,235 @@ func (m *sourceManager) applyLocked(staged []UpstreamDNSSourceYAML, prepared []s
 	return nil
 }
 
-func (m *sourceManager) add(ctx context.Context, src UpstreamDNSSourceYAML) (staged []UpstreamDNSSourceYAML, prepared []sourcePrepared, added UpstreamDNSSourceYAML, err error) {
-	out, prep, res, err := m.withStagedLocked(ctx, func(sources []UpstreamDNSSourceYAML, nextID uint64) ([]UpstreamDNSSourceYAML, []sourcePrepared, uint64, any, error) {
-		err := validateSourceURL(src.URL, m.conf.SafeFSPatterns)
-		if err != nil {
-			return nil, nil, nextID, nil, fmt.Errorf("checking source: %w", err)
+func (m *sourceManager) stageAdd(ctx context.Context, src UpstreamDNSSourceYAML) (res sourceStageResult, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	err = validateSourceURL(src.URL, m.conf.SafeFSPatterns)
+	if err != nil {
+		return res, fmt.Errorf("checking source: %w", err)
+	}
+
+	if slices.ContainsFunc(m.conf.UpstreamDNSSources, func(cur UpstreamDNSSourceYAML) bool { return cur.URL == src.URL }) {
+		return res, errors.New("url already exists")
+	}
+
+	staged := m.cloneSources()
+	prepared := make([]sourcePrepared, len(staged)+1)
+
+	src.ID = m.nextID
+	m.nextID++
+
+	p, err := m.prepare(ctx, src)
+	if err != nil {
+		m.cleanupPrepared(prepared)
+
+		return res, fmt.Errorf("preparing source: %w", err)
+	}
+	p.prevChecksum = src.checksum
+
+	src.ensureName(p.name)
+	src.RulesCount = p.count
+	src.checksum = p.checksum
+	src.LastUpdated = p.lastUpdated
+
+	staged = append(staged, src)
+	prepared[len(staged)-1] = p
+
+	res = sourceStageResult{
+		staged:           staged,
+		prepared:         prepared,
+		requiresRestart:  src.Enabled,
+		hadContentChange: src.Enabled,
+		updated:          boolToInt(src.Enabled),
+		added:            src.clone(),
+	}
+
+	return res, nil
+}
+
+func (m *sourceManager) stageRemove(srcURL string) (res sourceStageResult, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	staged := m.cloneSources()
+	idx := slices.IndexFunc(staged, func(src UpstreamDNSSourceYAML) bool { return src.URL == srcURL })
+	if idx < 0 {
+		return res, errors.New("url doesn't exist")
+	}
+
+	removed := staged[idx].clone()
+	staged = slices.Delete(staged, idx, idx+1)
+
+	res = sourceStageResult{
+		staged:          staged,
+		requiresRestart: removed.Enabled,
+		removed:         removed,
+	}
+
+	return res, nil
+}
+
+func (m *sourceManager) stageSet(ctx context.Context, oldURL string, data UpstreamDNSSourceYAML) (res sourceStageResult, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	staged := m.cloneSources()
+	idx := slices.IndexFunc(staged, func(src UpstreamDNSSourceYAML) bool { return src.URL == oldURL })
+	if idx < 0 {
+		return res, errors.New("url doesn't exist")
+	}
+
+	err = validateSourceURL(data.URL, m.conf.SafeFSPatterns)
+	if err != nil {
+		return res, fmt.Errorf("checking source: %w", err)
+	}
+
+	if oldURL != data.URL && slices.ContainsFunc(staged, func(src UpstreamDNSSourceYAML) bool { return src.URL == data.URL }) {
+		return res, errors.New("url already exists")
+	}
+
+	src := staged[idx]
+	prepared := make([]sourcePrepared, len(staged))
+
+	metadataChanged := false
+	semanticChanged := false
+	needsPrepare := false
+	prevEnabled := src.Enabled
+
+	if src.Name != data.Name {
+		src.Name = data.Name
+		metadataChanged = true
+	}
+
+	if src.URL != data.URL {
+		src.URL = data.URL
+		src.clear()
+		semanticChanged = true
+		needsPrepare = data.Enabled
+	}
+
+	if src.Enabled != data.Enabled {
+		src.Enabled = data.Enabled
+		semanticChanged = true
+		needsPrepare = data.Enabled
+		if !data.Enabled {
+			src.clear()
+		}
+	}
+
+	hadContentChange := false
+	if needsPrepare {
+		p, prepErr := m.prepare(ctx, src.clone())
+		if prepErr != nil {
+			m.cleanupPrepared(prepared)
+
+			return res, prepErr
+		}
+		p.prevChecksum = src.checksum
+
+		hadContentChange = p.checksum != src.checksum
+		src.ensureName(p.name)
+		src.RulesCount = p.count
+		src.checksum = p.checksum
+		src.LastUpdated = p.lastUpdated
+		prepared[idx] = p
+	}
+
+	staged[idx] = src
+
+	res = sourceStageResult{
+		staged:           staged,
+		prepared:         prepared,
+		requiresRestart:  (semanticChanged && (prevEnabled || src.Enabled)) || hadContentChange,
+		hadContentChange: hadContentChange,
+		updated:          boolToInt(hadContentChange),
+	}
+
+	if !metadataChanged && !semanticChanged {
+		res.staged = nil
+	}
+
+	return res, nil
+}
+
+func (m *sourceManager) stageRefresh(ctx context.Context, force bool) (res sourceStageResult, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	staged := m.cloneSources()
+	prepared := make([]sourcePrepared, len(staged))
+	warnings := []error{}
+	updated := 0
+	refreshed := 0
+
+	for i := range staged {
+		src := &staged[i]
+		if !src.Enabled {
+			continue
 		}
 
-		if slices.ContainsFunc(sources, func(cur UpstreamDNSSourceYAML) bool { return cur.URL == src.URL }) {
-			return nil, nil, nextID, nil, errors.New("url already exists")
+		if !force && !src.LastUpdated.IsZero() {
+			continue
 		}
 
-		src.ID = nextID
-		nextID++
+		p, prepErr := m.prepare(ctx, src.clone())
+		if prepErr != nil {
+			warnings = append(warnings, fmt.Errorf("preparing source %q: %w", src.URL, prepErr))
 
-		p, err := m.prepare(ctx, src)
-		if err != nil {
-			return nil, nil, nextID, nil, fmt.Errorf("preparing source: %w", err)
+			continue
 		}
+		p.prevChecksum = src.checksum
+
+		refreshed++
+		wasUpdated := p.checksum != src.checksum
 
 		src.ensureName(p.name)
 		src.RulesCount = p.count
 		src.checksum = p.checksum
 		src.LastUpdated = p.lastUpdated
+		prepared[i] = p
 
-		sources = append(sources, src)
-		prepared := make([]sourcePrepared, len(sources))
-		prepared[len(sources)-1] = p
-
-		return sources, prepared, nextID, src.clone(), nil
-	})
-	if err != nil {
-		return nil, nil, added, err
+		if wasUpdated {
+			updated++
+		}
 	}
 
-	added = res.(UpstreamDNSSourceYAML)
+	if refreshed == 0 && len(warnings) > 0 {
+		m.cleanupPrepared(prepared)
 
-	return out, prep, added, nil
-}
-
-func (m *sourceManager) remove(srcURL string) (staged []UpstreamDNSSourceYAML, removed UpstreamDNSSourceYAML, err error) {
-	out, _, res, err := m.withStagedLocked(context.Background(), func(sources []UpstreamDNSSourceYAML, nextID uint64) ([]UpstreamDNSSourceYAML, []sourcePrepared, uint64, any, error) {
-		idx := slices.IndexFunc(sources, func(src UpstreamDNSSourceYAML) bool { return src.URL == srcURL })
-		if idx < 0 {
-			return nil, nil, nextID, nil, errors.New("url doesn't exist")
-		}
-
-		removed := sources[idx].clone()
-		sources = slices.Delete(sources, idx, idx+1)
-
-		return sources, nil, nextID, removed, nil
-	})
-	if err != nil {
-		return nil, removed, err
+		return res, errors.Join(warnings...)
 	}
 
-	removed = res.(UpstreamDNSSourceYAML)
-
-	return out, removed, nil
-}
-
-func (m *sourceManager) set(ctx context.Context, oldURL string, data UpstreamDNSSourceYAML) (staged []UpstreamDNSSourceYAML, prepared []sourcePrepared, changed bool, err error) {
-	out, prep, res, err := m.withStagedLocked(ctx, func(sources []UpstreamDNSSourceYAML, nextID uint64) ([]UpstreamDNSSourceYAML, []sourcePrepared, uint64, any, error) {
-		idx := slices.IndexFunc(sources, func(src UpstreamDNSSourceYAML) bool { return src.URL == oldURL })
-		if idx < 0 {
-			return nil, nil, nextID, nil, errors.New("url doesn't exist")
-		}
-
-		err := validateSourceURL(data.URL, m.conf.SafeFSPatterns)
-		if err != nil {
-			return nil, nil, nextID, nil, fmt.Errorf("checking source: %w", err)
-		}
-
-		if oldURL != data.URL && slices.ContainsFunc(sources, func(src UpstreamDNSSourceYAML) bool { return src.URL == data.URL }) {
-			return nil, nil, nextID, nil, errors.New("url already exists")
-		}
-
-		src := sources[idx]
-		changed := false
-
-		if src.Name != data.Name {
-			src.Name = data.Name
-			changed = true
-		}
-
-		needsPrepare := false
-		if src.URL != data.URL {
-			src.URL = data.URL
-			src.clear()
-			changed = true
-			needsPrepare = data.Enabled
-		}
-
-		if src.Enabled != data.Enabled {
-			src.Enabled = data.Enabled
-			changed = true
-			needsPrepare = data.Enabled
-			if !data.Enabled {
-				src.clear()
-			}
-		}
-
-		prepared := make([]sourcePrepared, len(sources))
-		if needsPrepare {
-			p, err := m.prepare(ctx, src.clone())
-			if err != nil {
-				return nil, nil, nextID, nil, err
-			}
-
-			src.ensureName(p.name)
-			src.RulesCount = p.count
-			src.checksum = p.checksum
-			src.LastUpdated = p.lastUpdated
-			prepared[idx] = p
-		}
-
-		sources[idx] = src
-
-		return sources, prepared, nextID, changed, nil
-	})
-	if err != nil {
-		return nil, nil, false, err
+	res = sourceStageResult{
+		staged:           staged,
+		prepared:         prepared,
+		requiresRestart:  updated > 0,
+		hadContentChange: updated > 0,
+		updated:          updated,
+		warnings:         warnings,
 	}
 
-	changed = res.(bool)
-
-	return out, prep, changed, nil
+	return res, nil
 }
 
-func (m *sourceManager) refresh(ctx context.Context, force bool) (staged []UpstreamDNSSourceYAML, prepared []sourcePrepared, updated int, err error) {
-	out, prep, res, err := m.withStagedLocked(ctx, func(sources []UpstreamDNSSourceYAML, nextID uint64) ([]UpstreamDNSSourceYAML, []sourcePrepared, uint64, any, error) {
-		prepared := make([]sourcePrepared, len(sources))
-		updated := 0
-
-		for i := range sources {
-			src := &sources[i]
-			if !src.Enabled {
-				continue
-			}
-
-			if !force && !src.LastUpdated.IsZero() {
-				continue
-			}
-
-			p, prepErr := m.prepare(ctx, src.clone())
-			if prepErr != nil {
-				return nil, nil, nextID, nil, prepErr
-			}
-
-			wasUpdated := p.checksum != src.checksum
-
-			src.ensureName(p.name)
-			src.RulesCount = p.count
-			src.checksum = p.checksum
-			src.LastUpdated = p.lastUpdated
-			prepared[i] = p
-
-			if wasUpdated {
-				updated++
-			}
-		}
-
-		return sources, prepared, nextID, updated, nil
-	})
-	if err != nil {
-		return nil, nil, 0, err
+func (m *sourceManager) applyStaged(res sourceStageResult) (err error) {
+	if res.staged == nil {
+		return nil
 	}
 
-	updated = res.(int)
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	return out, prep, updated, nil
+	return m.applyPreparedLocked(res.staged, res.prepared)
 }
 
-func (m *sourceManager) apply(staged []UpstreamDNSSourceYAML, prepared []sourcePrepared) (err error) {
-	return m.applyLocked(staged, prepared)
+func boolToInt(v bool) int {
+	if v {
+		return 1
+	}
+
+	return 0
 }
 
 func (m *sourceManager) all() (sources []UpstreamDNSSourceYAML) {

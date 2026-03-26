@@ -179,6 +179,10 @@ type Server struct {
 	// upstreamSources manages source list settings and cached contents.
 	upstreamSources *sourceManager
 
+	// upstreamSourcesMu serializes full upstream source update transactions,
+	// including staging, reconfiguration, and final commit.
+	upstreamSourcesMu sync.Mutex
+
 	// serverLock protects Server.
 	serverLock sync.RWMutex
 

@@ -341,6 +341,18 @@ func TestDNSForwardHTTP_handleSetConfig(t *testing.T) {
 			w.Body.Reset()
 		})
 	}
+
+	t.Run("rejects_upstream_dns_sources_mutation", func(t *testing.T) {
+		rBody := io.NopCloser(bytes.NewReader([]byte(`{
+			"upstream_dns_sources": [{"id":1,"name":"test","url":"https://example.org/source.txt","enabled":true}]
+		}`)))
+		r, reqErr := http.NewRequest(http.MethodPost, "http://example.com", rBody)
+		require.NoError(t, reqErr)
+
+		s.handleSetConfig(w, r)
+		assert.Contains(t, strings.TrimSuffix(w.Body.String(), "\n"), "upstream_dns_sources must be managed via /control/upstream_dns_sources")
+		w.Body.Reset()
+	})
 }
 
 // newLocalUpstreamListener creates a local upstream listener and returns its
@@ -620,6 +632,56 @@ func TestServer_UpstreamSourcesHTTP(t *testing.T) {
 		assert.False(t, resp.Sources[0].Enabled)
 	})
 
+	t.Run("set_name_only_does_not_refresh_timestamp", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodPost, "/control/upstream_dns_sources/set_url", reqBody(map[string]any{
+			"url": localSrcPath,
+			"data": map[string]any{
+				"name":    "local-disabled-renamed",
+				"url":     localSrcPath,
+				"enabled": false,
+			},
+		}))
+		w := httptest.NewRecorder()
+		srv.handleUpstreamSourcesSetURL(w, r.WithContext(ctx))
+		require.Equal(t, http.StatusOK, w.Code)
+
+		sources := srv.upstreamSources.all()
+		require.Len(t, sources, 1)
+		assert.Equal(t, "local-disabled-renamed", sources[0].Name)
+		assert.True(t, sources[0].LastUpdated.IsZero())
+	})
+
+	t.Run("refresh_without_changes_keeps_timestamp", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodPost, "/control/upstream_dns_sources/set_url", reqBody(map[string]any{
+			"url": localSrcPath,
+			"data": map[string]any{
+				"name":    "local-enabled",
+				"url":     localSrcPath,
+				"enabled": true,
+			},
+		}))
+		w := httptest.NewRecorder()
+		srv.handleUpstreamSourcesSetURL(w, r.WithContext(ctx))
+		require.Equal(t, http.StatusOK, w.Code)
+
+		before := srv.upstreamSources.all()[0].LastUpdated
+		require.False(t, before.IsZero())
+
+		r = httptest.NewRequest(http.MethodPost, "/control/upstream_dns_sources/refresh", reqBody(map[string]any{}))
+		w = httptest.NewRecorder()
+		srv.handleUpstreamSourcesRefresh(w, r.WithContext(ctx))
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var body struct {
+			Updated int `json:"updated"`
+		}
+		require.NoError(t, json.NewDecoder(w.Body).Decode(&body))
+		assert.Equal(t, 0, body.Updated)
+
+		after := srv.upstreamSources.all()[0].LastUpdated
+		assert.Equal(t, before, after)
+	})
+
 	t.Run("remove", func(t *testing.T) {
 		r := httptest.NewRequest(http.MethodPost, "/control/upstream_dns_sources/remove_url", reqBody(map[string]string{
 			"url": localSrcPath,
@@ -747,4 +809,75 @@ func TestServer_HandleUpstreamDNSSources_RejectsUnsafeAndInvalidContent(t *testi
 		require.Equal(t, http.StatusBadRequest, w.Code)
 		assert.Empty(t, srv.upstreamSources.all())
 	})
+}
+
+func TestServer_HandleUpstreamDNSSources_RefreshPartialSuccess(t *testing.T) {
+	ctx := testutil.ContextWithTimeout(t, testTimeout)
+	tmpDir := t.TempDir()
+	goodSrcPath := filepath.Join(tmpDir, "good-upstreams.txt")
+	badSrcPath := filepath.Join(tmpDir, "bad-upstreams.txt")
+	require.NoError(t, os.WriteFile(goodSrcPath, []byte("[/example.org/]1.1.1.1\n"), 0o644))
+	require.NoError(t, os.WriteFile(badSrcPath, []byte("[/example.net/]9.9.9.9\n"), 0o644))
+
+	srv := createTestServer(t, &filtering.Config{
+		FilteringEnabled: true,
+		BlockingMode:     filtering.BlockingModeDefault,
+	}, ServerConfig{
+		Config: Config{
+			UpstreamDNS: []string{"8.8.8.8:53"},
+			UpstreamMode: UpstreamModeLoadBalance,
+			UpstreamDNSSources: []UpstreamDNSSourceYAML{{
+				Enabled: true,
+				URL:     goodSrcPath,
+				Name:    "good",
+				UpstreamDNSSource: UpstreamDNSSource{ID: 1},
+			}, {
+				Enabled: true,
+				URL:     badSrcPath,
+				Name:    "bad",
+				UpstreamDNSSource: UpstreamDNSSource{ID: 2},
+			}},
+			EDNSClientSubnet: &EDNSClientSubnet{},
+			ClientsContainer: EmptyClientsContainer{},
+		},
+		TLSConf:        &TLSConfig{},
+		ConfModifier:   agh.EmptyConfigModifier{},
+		ServePlainDNS:  true,
+		UDPListenAddrs: []*net.UDPAddr{},
+		TCPListenAddrs: []*net.TCPAddr{},
+		DataDir:        filepath.Join(tmpDir, "data"),
+		SafeFSPatterns: []string{filepath.Join(tmpDir, "*")},
+	})
+
+	sourcesBefore := srv.upstreamSources.all()
+	require.Len(t, sourcesBefore, 2)
+	goodBefore := sourcesBefore[0].LastUpdated
+	badBefore := sourcesBefore[1].LastUpdated
+	require.NoError(t, os.WriteFile(badSrcPath, []byte("udp://://bad\n"), 0o644))
+
+	reqBody := func(v any) io.ReadCloser {
+		b, e := json.Marshal(v)
+		require.NoError(t, e)
+
+		return io.NopCloser(bytes.NewReader(b))
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/control/upstream_dns_sources/refresh", reqBody(map[string]any{}))
+	srv.handleUpstreamSourcesRefresh(w, r.WithContext(ctx))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var body struct {
+		Updated int `json:"updated"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&body))
+	assert.Equal(t, 1, body.Updated)
+
+	sources := srv.upstreamSources.all()
+	require.Len(t, sources, 2)
+	assert.False(t, sources[0].LastUpdated.IsZero())
+	assert.Equal(t, badBefore, sources[1].LastUpdated)
+	assert.NotEqual(t, goodBefore, sources[0].LastUpdated)
+	_, statErr := os.Stat(sources[0].path(srv.conf.DataDir))
+	assert.NoError(t, statErr)
 }

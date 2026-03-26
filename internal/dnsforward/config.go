@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
+	"net/http"
 	"os"
 	"slices"
 	"strings"
@@ -283,6 +284,10 @@ type ServerConfig struct {
 
 	// Register an HTTP handler
 	HTTPReg aghhttp.Registrar
+
+	// HTTPClient is the client to use for fetching remote upstream source data.
+	// If nil, [http.DefaultClient] is used.
+	HTTPClient *http.Client
 
 	// LocalPTRResolvers is a slice of addresses to be used as upstreams for
 	// resolving PTR queries for local addresses.

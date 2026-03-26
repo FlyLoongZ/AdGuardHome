@@ -579,6 +579,19 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.UpstreamDNSSources != nil {
+		aghhttp.ErrorAndLog(
+			ctx,
+			l,
+			r,
+			w,
+			http.StatusBadRequest,
+			"upstream_dns_sources must be managed via /control/upstream_dns_sources",
+		)
+
+		return
+	}
+
 	restart := s.setConfig(req)
 	s.conf.ConfModifier.Apply(ctx)
 
@@ -661,7 +674,6 @@ func (s *Server) setConfigRestartable(dc *jsonDNSConfig) (shouldRestart bool) {
 		setIfNotNil(&s.conf.UpstreamDNS, dc.Upstreams),
 		setIfNotNil(&s.conf.LocalPTRResolvers, dc.LocalPTRUpstreams),
 		setIfNotNil(&s.conf.UpstreamDNSFileName, dc.UpstreamsFile),
-		setIfNotNil(&s.conf.UpstreamDNSSources, ptrSourceSlice(dc.UpstreamDNSSources)),
 		setIfNotNil(&s.conf.BootstrapDNS, dc.Bootstraps),
 		setIfNotNil(&s.conf.FallbackDNS, dc.Fallbacks),
 		setIfNotNil(&s.conf.EDNSClientSubnet.Enabled, dc.EDNSCSEnabled),

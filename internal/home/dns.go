@@ -289,6 +289,7 @@ func newServerConfig(
 		TLSv12Roots:            tlsMgr.rootCerts,
 		ConfModifier:           confModifier,
 		HTTPReg:                httpReg,
+		HTTPClient:             httpClient(tlsMgr),
 		LocalPTRResolvers:      dnsConf.PrivateRDNSResolvers,
 		UseDNS64:               dnsConf.UseDNS64,
 		DNS64Prefixes:          dnsConf.DNS64Prefixes,

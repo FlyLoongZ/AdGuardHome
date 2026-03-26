@@ -137,22 +137,27 @@ func (s *Server) handleUpstreamSourcesAddURL(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	staged, prepared, _, err := s.upstreamSources.add(ctx, UpstreamDNSSourceYAML{Enabled: true, URL: req.URL, Name: req.Name})
+	s.upstreamSourcesMu.Lock()
+	defer s.upstreamSourcesMu.Unlock()
+
+	stage, err := s.upstreamSources.stageAdd(ctx, UpstreamDNSSourceYAML{Enabled: true, URL: req.URL, Name: req.Name})
 	if err != nil {
 		aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusBadRequest, "%s", err)
 
 		return
 	}
 
-	reErr := s.reconfigureWithUpstreamSources(ctx, staged, prepared)
-	if reErr != nil {
-		s.upstreamSources.cleanupPrepared(prepared)
-		aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusInternalServerError, "%s", reErr)
+	if stage.requiresRestart {
+		reErr := s.reconfigureWithUpstreamSources(ctx, stage.staged, stage.prepared)
+		if reErr != nil {
+			s.upstreamSources.cleanupPrepared(stage.prepared)
+			aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusInternalServerError, "%s", reErr)
 
-		return
+			return
+		}
 	}
 
-	err = s.upstreamSources.apply(staged, prepared)
+	err = s.upstreamSources.applyStaged(stage)
 	if err != nil {
 		aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusInternalServerError, "%s", err)
 
@@ -174,20 +179,25 @@ func (s *Server) handleUpstreamSourcesRemoveURL(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	staged, _, err := s.upstreamSources.remove(req.URL)
+	s.upstreamSourcesMu.Lock()
+	defer s.upstreamSourcesMu.Unlock()
+
+	stage, err := s.upstreamSources.stageRemove(req.URL)
 	if err != nil {
 		aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusBadRequest, "%s", err)
 
 		return
 	}
 
-	if reErr := s.reconfigureWithUpstreamSources(ctx, staged, nil); reErr != nil {
-		aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusInternalServerError, "%s", reErr)
+	if stage.requiresRestart {
+		if reErr := s.reconfigureWithUpstreamSources(ctx, stage.staged, nil); reErr != nil {
+			aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusInternalServerError, "%s", reErr)
 
-		return
+			return
+		}
 	}
 
-	err = s.upstreamSources.apply(staged, nil)
+	err = s.upstreamSources.applyStaged(stage)
 	if err != nil {
 		aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusInternalServerError, "%s", err)
 
@@ -220,7 +230,10 @@ func (s *Server) handleUpstreamSourcesSetURL(w http.ResponseWriter, r *http.Requ
 		enabled = *req.Data.Enabled
 	}
 
-	staged, prepared, changed, err := s.upstreamSources.set(ctx, req.URL, UpstreamDNSSourceYAML{
+	s.upstreamSourcesMu.Lock()
+	defer s.upstreamSourcesMu.Unlock()
+
+	stage, err := s.upstreamSources.stageSet(ctx, req.URL, UpstreamDNSSourceYAML{
 		Name:    req.Data.Name,
 		URL:     req.Data.URL,
 		Enabled: enabled,
@@ -231,20 +244,22 @@ func (s *Server) handleUpstreamSourcesSetURL(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if !changed {
+	if stage.staged == nil {
 		aghhttp.OK(ctx, s.logger, w)
 
 		return
 	}
 
-	if reErr := s.reconfigureWithUpstreamSources(ctx, staged, prepared); reErr != nil {
-		s.upstreamSources.cleanupPrepared(prepared)
-		aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusInternalServerError, "%s", reErr)
+	if stage.requiresRestart {
+		if reErr := s.reconfigureWithUpstreamSources(ctx, stage.staged, stage.prepared); reErr != nil {
+			s.upstreamSources.cleanupPrepared(stage.prepared)
+			aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusInternalServerError, "%s", reErr)
 
-		return
+			return
+		}
 	}
 
-	err = s.upstreamSources.apply(staged, prepared)
+	err = s.upstreamSources.applyStaged(stage)
 	if err != nil {
 		aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusInternalServerError, "%s", err)
 
@@ -258,21 +273,30 @@ func (s *Server) handleUpstreamSourcesSetURL(w http.ResponseWriter, r *http.Requ
 
 func (s *Server) handleUpstreamSourcesRefresh(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	staged, prepared, updated, err := s.upstreamSources.refresh(ctx, true)
+	s.upstreamSourcesMu.Lock()
+	defer s.upstreamSourcesMu.Unlock()
+
+	stage, err := s.upstreamSources.stageRefresh(ctx, true)
 	if err != nil {
 		aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusBadRequest, "%s", err)
 
 		return
 	}
 
-	if reErr := s.reconfigureWithUpstreamSources(ctx, staged, prepared); reErr != nil {
-		s.upstreamSources.cleanupPrepared(prepared)
-		aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusInternalServerError, "%s", reErr)
-
-		return
+	for _, warn := range stage.warnings {
+		s.logger.WarnContext(ctx, "refreshing upstream source", slogutil.KeyError, warn)
 	}
 
-	err = s.upstreamSources.apply(staged, prepared)
+	if stage.requiresRestart {
+		if reErr := s.reconfigureWithUpstreamSources(ctx, stage.staged, stage.prepared); reErr != nil {
+			s.upstreamSources.cleanupPrepared(stage.prepared)
+			aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusInternalServerError, "%s", reErr)
+
+			return
+		}
+	}
+
+	err = s.upstreamSources.applyStaged(stage)
 	if err != nil {
 		aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusInternalServerError, "%s", err)
 
@@ -283,7 +307,7 @@ func (s *Server) handleUpstreamSourcesRefresh(w http.ResponseWriter, r *http.Req
 
 	aghhttp.WriteJSONResponseOK(ctx, s.logger, w, r, struct {
 		Updated int `json:"updated"`
-	}{Updated: updated})
+	}{Updated: stage.updated})
 }
 
 func (s *Server) reconfigureWithUpstreamSources(
