@@ -71,6 +71,7 @@ const DnsRoutingTable = ({
             Header: <Trans>source_label</Trans>,
             accessor: 'url',
             minWidth: 240,
+            // eslint-disable-next-line react/prop-types
             Cell: ({ value }: any) => (
                 <div className="logs__row">
                     {isValidAbsolutePath(value) ? (
@@ -88,6 +89,7 @@ const DnsRoutingTable = ({
             accessor: 'rulesCount',
             className: 'text-center',
             minWidth: 120,
+            // eslint-disable-next-line react/prop-types
             Cell: (props: any) => props.value.toLocaleString(),
         },
         {
