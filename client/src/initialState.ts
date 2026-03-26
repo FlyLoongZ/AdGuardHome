@@ -306,6 +306,7 @@ export type DhcpData = {
 export type DnsConfigData = {
     processingGetConfig: boolean;
     processingSetConfig: boolean;
+    loaded: boolean;
     blocking_mode: string;
     ratelimit: number;
     blocking_ipv4: string;
@@ -516,6 +517,7 @@ export const initialState: RootState = {
     dnsConfig: {
         processingGetConfig: false,
         processingSetConfig: false,
+        loaded: false,
         blocking_mode: BLOCKING_MODES.default,
         ratelimit: 20,
         blocking_ipv4: DEFAULT_BLOCKING_IPV4,

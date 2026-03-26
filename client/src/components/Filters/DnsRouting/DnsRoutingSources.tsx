@@ -4,6 +4,7 @@ import { shallowEqual, useDispatch, useSelector } from 'react-redux';
 
 import Card from '../../ui/Card';
 import { RootState } from '../../../initialState';
+import { getDnsConfig } from '../../../actions/dnsConfig';
 import {
     addUpstreamDnsSource,
     getUpstreamDnsSources,
@@ -35,7 +36,10 @@ const DnsRoutingSources = ({ standalone = false }: DnsRoutingSourcesProps) => {
         selectedSourceUrl,
     } = useSelector((state: RootState) => state.upstreamDnsSources, shallowEqual);
 
-    const upstreamDnsFile = useSelector((state: RootState) => state.dnsConfig.upstream_dns_file);
+    const { upstream_dns_file: upstreamDnsFile, processingGetConfig, loaded } = useSelector(
+        (state: RootState) => state.dnsConfig,
+        shallowEqual,
+    );
 
     const selectedSource = useMemo(() => sources.find((source: any) => source.url === selectedSourceUrl), [
         selectedSourceUrl,
@@ -43,10 +47,12 @@ const DnsRoutingSources = ({ standalone = false }: DnsRoutingSourcesProps) => {
     ]);
 
     const isEdit = Boolean(selectedSource);
-    const isLegacyFileMode = Boolean(upstreamDnsFile);
+    const isDnsConfigPending = !loaded || processingGetConfig;
+    const isLegacyFileMode = isDnsConfigPending || Boolean(upstreamDnsFile);
 
     useEffect(() => {
         dispatch(getUpstreamDnsSources());
+        dispatch(getDnsConfig());
     }, []);
 
     const closeModal = () => {

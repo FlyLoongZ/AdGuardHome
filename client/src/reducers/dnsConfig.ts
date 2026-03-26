@@ -40,6 +40,7 @@ const dnsConfig = handleActions(
                 local_ptr_upstreams: (local_ptr_upstreams && local_ptr_upstreams.join('\n')) || '',
                 ratelimit_whitelist: (ratelimit_whitelist && ratelimit_whitelist.join('\n')) || '',
                 processingGetConfig: false,
+                loaded: true,
                 upstream_mode: upstream_mode === '' ? DNS_REQUEST_OPTIONS.LOAD_BALANCING : upstream_mode,
             };
         },
@@ -61,6 +62,7 @@ const dnsConfig = handleActions(
     {
         processingGetConfig: false,
         processingSetConfig: false,
+        loaded: false,
         blocking_mode: BLOCKING_MODES.default,
         ratelimit: 20,
         blocking_ipv4: DEFAULT_BLOCKING_IPV4,
