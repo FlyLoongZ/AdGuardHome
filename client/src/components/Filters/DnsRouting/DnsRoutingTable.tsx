@@ -4,7 +4,6 @@ import ReactTable from 'react-table';
 import { Trans, useTranslation } from 'react-i18next';
 
 import CellWrap from '../../ui/CellWrap';
-import { Checkbox } from '../../ui/Controls/Checkbox';
 import { formatDetailedDateTime } from '../../../helpers/helpers';
 import { isValidAbsolutePath } from '../../../helpers/form';
 
@@ -50,15 +49,17 @@ const DnsRoutingTable = ({
             className: 'text-center',
             resizable: false,
             Cell: ({ original }: any) => (
-                <div className="d-inline-block">
-                    <Checkbox
+                <label className="checkbox">
+                    <input
                         title={original.enabled ? t('upstream_dns_source_state_enabled') : t('disabled')}
-                        value={original.enabled}
-                        className="checkbox--settings"
+                        type="checkbox"
+                        className="checkbox__input"
                         disabled={processingSet || disabledByFile}
+                        checked={original.enabled}
                         onChange={() => onToggle(original)}
                     />
-                </div>
+                    <span className="checkbox__label" />
+                </label>
             ),
         },
         {
