@@ -2,12 +2,12 @@ import React from 'react';
 import ReactModal from 'react-modal';
 import { useTranslation } from 'react-i18next';
 
-import DnsRoutingForm from './DnsRoutingForm';
+import Form from './Form';
 import '../../ui/Modal.css';
 
 ReactModal.setAppElement('#root');
 
-type DnsRoutingModalProps = {
+type ModalProps = {
     isOpen: boolean;
     isEdit: boolean;
     processing: boolean;
@@ -19,7 +19,7 @@ type DnsRoutingModalProps = {
     onSubmit: (values: { name: string; url: string }) => void;
 };
 
-const DnsRoutingModal = ({ isOpen, isEdit, processing, initialValues, onClose, onSubmit }: DnsRoutingModalProps) => {
+const Modal = ({ isOpen, isEdit, processing, initialValues, onClose, onSubmit }: ModalProps) => {
     const { t } = useTranslation();
 
     return (
@@ -37,7 +37,7 @@ const DnsRoutingModal = ({ isOpen, isEdit, processing, initialValues, onClose, o
                     </button>
                 </div>
 
-                <DnsRoutingForm
+                <Form
                     initialValues={initialValues}
                     processing={processing}
                     onCancel={onClose}
@@ -48,4 +48,4 @@ const DnsRoutingModal = ({ isOpen, isEdit, processing, initialValues, onClose, o
     );
 };
 
-export default DnsRoutingModal;
+export default Modal;

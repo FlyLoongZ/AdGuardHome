@@ -16,7 +16,7 @@ type SourceRow = {
     lastUpdated: string;
 };
 
-type DnsRoutingTableProps = {
+type TableProps = {
     data: SourceRow[];
     loading: boolean;
     processingSet: boolean;
@@ -27,7 +27,7 @@ type DnsRoutingTableProps = {
     onDelete: (url: string) => void;
 };
 
-const DnsRoutingTable = ({
+const Table = ({
     data,
     loading,
     processingSet,
@@ -36,7 +36,7 @@ const DnsRoutingTable = ({
     onToggle,
     onEdit,
     onDelete,
-}: DnsRoutingTableProps) => {
+}: TableProps) => {
     const { t } = useTranslation();
 
     const renderDateCell = (row: any) => CellWrap(row, formatDetailedDateTime);
@@ -155,4 +155,4 @@ const DnsRoutingTable = ({
     );
 };
 
-export default DnsRoutingTable;
+export default Table;

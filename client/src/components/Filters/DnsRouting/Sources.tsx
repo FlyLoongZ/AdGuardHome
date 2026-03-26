@@ -14,14 +14,14 @@ import {
     toggleUpstreamDnsSource,
     toggleUpstreamDnsSourceModal,
 } from '../../../actions/upstreamDnsSources';
-import DnsRoutingTable from './DnsRoutingTable';
-import DnsRoutingModal from './DnsRoutingModal';
+import Table from './Table';
+import Modal from './Modal';
 
-type DnsRoutingSourcesProps = {
+type SourcesProps = {
     standalone?: boolean;
 };
 
-const DnsRoutingSources = ({ standalone = false }: DnsRoutingSourcesProps) => {
+const Sources = ({ standalone = false }: SourcesProps) => {
     const { t } = useTranslation();
     const dispatch = useDispatch();
 
@@ -111,7 +111,7 @@ const DnsRoutingSources = ({ standalone = false }: DnsRoutingSourcesProps) => {
                 </div>
             )}
 
-            <DnsRoutingTable
+            <Table
                 data={sources}
                 loading={loading}
                 processingSet={processingSet}
@@ -140,7 +140,7 @@ const DnsRoutingSources = ({ standalone = false }: DnsRoutingSourcesProps) => {
                 </button>
             </div>
 
-            <DnsRoutingModal
+            <Modal
                 isOpen={isModalOpen}
                 isEdit={isEdit}
                 processing={modalProcessing}
@@ -158,4 +158,4 @@ const DnsRoutingSources = ({ standalone = false }: DnsRoutingSourcesProps) => {
     return <Card title={t('dns_routing')} subtitle={t('dns_routing_desc')} bodyType="card-body box-body--settings">{content}</Card>;
 };
 
-export default DnsRoutingSources;
+export default Sources;

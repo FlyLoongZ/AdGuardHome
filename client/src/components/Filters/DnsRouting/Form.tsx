@@ -10,14 +10,14 @@ type SourceFormValues = {
     url: string;
 };
 
-type DnsRoutingFormProps = {
+type FormProps = {
     initialValues?: Partial<SourceFormValues>;
     processing: boolean;
     onCancel: () => void;
     onSubmit: (values: SourceFormValues) => void;
 };
 
-const DnsRoutingForm = ({ initialValues, processing, onCancel, onSubmit }: DnsRoutingFormProps) => {
+const Form = ({ initialValues, processing, onCancel, onSubmit }: FormProps) => {
     const { t } = useTranslation();
 
     const {
@@ -91,5 +91,4 @@ const DnsRoutingForm = ({ initialValues, processing, onCancel, onSubmit }: DnsRo
     );
 };
 
-export default DnsRoutingForm;
-
+export default Form;

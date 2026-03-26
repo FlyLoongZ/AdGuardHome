@@ -1,9 +1,9 @@
 import React from 'react';
 import { withTranslation } from 'react-i18next';
 
-import PageTitle from '../ui/PageTitle';
-import Card from '../ui/Card';
-import DnsRoutingSources from './DnsRouting/DnsRoutingSources';
+import PageTitle from '../../ui/PageTitle';
+import Card from '../../ui/Card';
+import Sources from './Sources';
 
 interface DnsRoutingProps {
     t: (...args: unknown[]) => string;
@@ -17,7 +17,7 @@ const DnsRouting = ({ t }: DnsRoutingProps) => (
             <div className="row">
                 <div className="col-md-12">
                     <Card>
-                        <DnsRoutingSources standalone />
+                        <Sources standalone />
                     </Card>
                 </div>
             </div>
