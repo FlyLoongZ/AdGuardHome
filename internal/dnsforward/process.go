@@ -426,12 +426,13 @@ func (s *Server) processUpstream(ctx context.Context, dctx *dnsContext) (rc resu
 	if pctx.Res != nil {
 		// The response has already been set.
 		return resultCodeSuccess
-	} else if dctx.isDHCPHost {
+	}
+
+	s.setCustomUpstream(ctx, pctx, dctx.clientID)
+
+	if dctx.isDHCPHost && !s.canRouteDHCPHost(req.Question[0].Name, pctx, dctx.clientID) {
 		// A DHCP client hostname query that hasn't been handled or filtered.
 		// Respond with an NXDOMAIN.
-		//
-		// TODO(a.garipov): Route such queries to a custom upstream for the
-		// local domain name if there is one.
 		name := req.Question[0].Name
 		s.logger.DebugContext(
 			ctx,
@@ -442,8 +443,6 @@ func (s *Server) processUpstream(ctx context.Context, dctx *dnsContext) (rc resu
 
 		return resultCodeFinish
 	}
-
-	s.setCustomUpstream(ctx, pctx, dctx.clientID)
 
 	reqWantsDNSSEC := s.setReqAD(req)
 
@@ -508,6 +507,20 @@ func (s *Server) setRespAD(pctx *proxy.DNSContext, reqWantsDNSSEC bool) {
 		pctx.Req.AuthenticatedData = false
 		pctx.Res.AuthenticatedData = false
 	}
+}
+
+// canRouteDHCPHost returns true if an unresolved DHCP local-domain request can
+// still be answered through client-specific or domain-specific upstreams.
+func (s *Server) canRouteDHCPHost(fqdn string, pctx *proxy.DNSContext, clientID string) (ok bool) {
+	if s.conf.ClientsContainer != nil &&
+		s.conf.ClientsContainer.HasCustomDomainSpecificUpstream(clientID, pctx.Addr.Addr(), fqdn) {
+		return true
+	}
+
+	s.serverLock.RLock()
+	defer s.serverLock.RUnlock()
+
+	return hasDomainSpecificUpstream(s.conf.UpstreamConfig, fqdn)
 }
 
 // dhcpHostFromRequest returns a hostname from question, if the request is for a

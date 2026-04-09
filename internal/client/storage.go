@@ -746,6 +746,24 @@ func (s *Storage) CustomUpstreamConfig(
 	return s.upstreamManager.customUpstreamConfig(c.UID, c.Name)
 }
 
+// HasCustomDomainSpecificUpstream implements the [dnsforward.ClientsContainer]
+// interface for *Storage.
+func (s *Storage) HasCustomDomainSpecificUpstream(id string, addr netip.Addr, fqdn string) (ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	c, ok := s.index.findByClientID(ClientID(id))
+	if !ok {
+		c, ok = s.findByIP(addr)
+	}
+
+	if !ok {
+		return false
+	}
+
+	return s.upstreamManager.hasSpecificUpstream(c.UID, c.Name, fqdn)
+}
+
 // UpdateCommonUpstreamConfig implements the [dnsforward.ClientsContainer]
 // interface for *Storage
 func (s *Storage) UpdateCommonUpstreamConfig(conf *CommonUpstreamConfig) {

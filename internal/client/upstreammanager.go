@@ -53,6 +53,10 @@ type customUpstreamConfig struct {
 
 	// isChanged indicates whether the proxyConf needs to be updated.
 	isChanged bool
+
+	// hasSpecificUpstream reports whether the configuration has a domain-
+	// specific upstream for a fully-qualified domain name.
+	hasSpecificUpstream func(fqdn string) (ok bool)
 }
 
 // upstreamManager stores and updates custom client upstream configurations.
@@ -147,7 +151,11 @@ func (m *upstreamManager) customUpstreamConfig(
 		aghslog.KeyClientName,
 		clientName,
 	)
-	proxyConf = newCustomUpstreamConfig(cliConf, m.commonConf, cliLogger)
+	proxyConf, cliConf.hasSpecificUpstream = newCustomUpstreamConfig(
+		cliConf,
+		m.commonConf,
+		cliLogger,
+	)
 	cliConf.proxyConf = proxyConf
 	cliConf.commonConfUpdate = m.confUpdate
 	cliConf.isChanged = false
@@ -159,6 +167,27 @@ func (m *upstreamManager) customUpstreamConfig(
 // upstream configuration.
 func (m *upstreamManager) isConfigChanged(cliConf *customUpstreamConfig) (ok bool) {
 	return !m.confUpdate.Equal(cliConf.commonConfUpdate) || cliConf.isChanged
+}
+
+// hasSpecificUpstream returns true if the client's custom upstream
+// configuration has a domain-specific upstream for fqdn.
+func (m *upstreamManager) hasSpecificUpstream(uid UID, clientName, fqdn string) (ok bool) {
+	cliConf, ok := m.uidToCustomConf[uid]
+	if !ok {
+		m.logger.Error("no associated custom client upstream config")
+
+		return false
+	}
+
+	if m.isConfigChanged(cliConf) {
+		_ = m.customUpstreamConfig(uid, clientName)
+	}
+
+	if cliConf.hasSpecificUpstream == nil {
+		return false
+	}
+
+	return cliConf.hasSpecificUpstream(fqdn)
 }
 
 // clearUpstreamCache clears the upstream cache for each stored custom client
@@ -210,10 +239,10 @@ func newCustomUpstreamConfig(
 	cliConf *customUpstreamConfig,
 	conf *CommonUpstreamConfig,
 	cliLogger *slog.Logger,
-) (proxyConf *proxy.CustomUpstreamConfig) {
+) (proxyConf *proxy.CustomUpstreamConfig, match func(fqdn string) (ok bool)) {
 	upstreams := stringutil.FilterOut(cliConf.upstreams, aghnet.IsCommentOrEmpty)
 	if len(upstreams) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	upsConf, err := proxy.ParseUpstreamsConfig(
@@ -237,5 +266,5 @@ func newCustomUpstreamConfig(
 		cliConf.upstreamsCacheEnabled,
 		int(cliConf.upstreamsCacheSize),
 		conf.EDNSClientSubnetEnabled,
-	)
+	), newSpecificUpstreamMatcher(upsConf)
 }

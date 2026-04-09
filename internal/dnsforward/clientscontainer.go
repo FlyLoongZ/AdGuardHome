@@ -14,6 +14,10 @@ type ClientsContainer interface {
 	// client.
 	CustomUpstreamConfig(clientID string, cliAddr netip.Addr) (conf *proxy.CustomUpstreamConfig)
 
+	// HasCustomDomainSpecificUpstream returns true if the identified client has a
+	// domain-specific custom upstream for fqdn.
+	HasCustomDomainSpecificUpstream(clientID string, cliAddr netip.Addr, fqdn string) (ok bool)
+
 	// UpdateCommonUpstreamConfig updates the common upstream configuration.
 	UpdateCommonUpstreamConfig(conf *client.CommonUpstreamConfig)
 
@@ -35,6 +39,16 @@ func (EmptyClientsContainer) CustomUpstreamConfig(
 	cliAddr netip.Addr,
 ) (conf *proxy.CustomUpstreamConfig) {
 	return nil
+}
+
+// HasCustomDomainSpecificUpstream implements the [ClientsContainer] interface
+// for EmptyClientsContainer.
+func (EmptyClientsContainer) HasCustomDomainSpecificUpstream(
+	clientID string,
+	cliAddr netip.Addr,
+	fqdn string,
+) (ok bool) {
+	return false
 }
 
 // UpdateCommonUpstreamConfig implements the [ClientsContainer] interface for
