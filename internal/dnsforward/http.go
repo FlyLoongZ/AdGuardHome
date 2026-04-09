@@ -749,7 +749,24 @@ func (s *Server) handleTestUpstreamDNS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	req.Upstreams = s.appendUpstreamSourcesForTest(ctx, req.Upstreams)
+	if s.conf.UpstreamDNSFileName != "" {
+		req.Upstreams, err = s.conf.loadUpstreams(ctx, s.logger)
+		if err != nil {
+			aghhttp.ErrorAndLog(
+				ctx,
+				l,
+				r,
+				w,
+				http.StatusBadRequest,
+				"Failed to load effective upstream servers: %s",
+				err,
+			)
+
+			return
+		}
+	} else {
+		req.Upstreams = s.appendUpstreamSourcesForTest(ctx, req.Upstreams)
+	}
 
 	req.BootstrapDNS = stringutil.FilterOut(req.BootstrapDNS, aghnet.IsCommentOrEmpty)
 
