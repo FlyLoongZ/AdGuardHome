@@ -117,6 +117,20 @@ type upstreamSourceStatusResp struct {
 	Sources []upstreamSourceJSON `json:"sources"`
 }
 
+// errUpstreamSourcesManagedByFile is returned when upstream source management is
+// attempted while the effective upstream configuration is loaded from file.
+const errUpstreamSourcesManagedByFile = "upstream_dns_sources are disabled while upstream_dns_file is set"
+
+// checkUpstreamSourcesMutable returns an error if upstream source management is
+// disabled because the effective upstream configuration is loaded from file.
+func (s *Server) checkUpstreamSourcesMutable() (err error) {
+	if s.conf.UpstreamDNSFileName != "" {
+		return errors.Error(errUpstreamSourcesManagedByFile)
+	}
+
+	return nil
+}
+
 func (s *Server) handleUpstreamSourcesStatus(w http.ResponseWriter, r *http.Request) {
 	s.serverLock.RLock()
 	sources := s.upstreamSources.all()
@@ -129,6 +143,12 @@ func (s *Server) handleUpstreamSourcesStatus(w http.ResponseWriter, r *http.Requ
 
 func (s *Server) handleUpstreamSourcesAddURL(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	if err := s.checkUpstreamSourcesMutable(); err != nil {
+		aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusBadRequest, "%s", err)
+
+		return
+	}
+
 	req := &upstreamSourceAddJSON{}
 	err := json.NewDecoder(r.Body).Decode(req)
 	if err != nil {
@@ -171,6 +191,12 @@ func (s *Server) handleUpstreamSourcesAddURL(w http.ResponseWriter, r *http.Requ
 
 func (s *Server) handleUpstreamSourcesRemoveURL(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	if err := s.checkUpstreamSourcesMutable(); err != nil {
+		aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusBadRequest, "%s", err)
+
+		return
+	}
+
 	req := &upstreamSourceAddJSON{}
 	err := json.NewDecoder(r.Body).Decode(req)
 	if err != nil {
@@ -211,6 +237,12 @@ func (s *Server) handleUpstreamSourcesRemoveURL(w http.ResponseWriter, r *http.R
 
 func (s *Server) handleUpstreamSourcesSetURL(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	if err := s.checkUpstreamSourcesMutable(); err != nil {
+		aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusBadRequest, "%s", err)
+
+		return
+	}
+
 	req := &upstreamSourceSetReq{}
 	err := json.NewDecoder(r.Body).Decode(req)
 	if err != nil {
@@ -273,6 +305,12 @@ func (s *Server) handleUpstreamSourcesSetURL(w http.ResponseWriter, r *http.Requ
 
 func (s *Server) handleUpstreamSourcesRefresh(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	if err := s.checkUpstreamSourcesMutable(); err != nil {
+		aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusBadRequest, "%s", err)
+
+		return
+	}
+
 	s.upstreamSourcesMu.Lock()
 	defer s.upstreamSourcesMu.Unlock()
 
