@@ -391,8 +391,23 @@ export const testUpstream =
             };
 
             const upstreamResponse = await apiClient.testUpstream(config);
-            const testMessages = Object.keys(upstreamResponse).map((key) => {
-                const message = upstreamResponse[key];
+            const hasGroupedStatus = ['general', 'fallback', 'private'].some((key) =>
+                upstreamResponse && typeof upstreamResponse[key] === 'object',
+            );
+            const statuses = hasGroupedStatus
+                ? Object.values(upstreamResponse || {}).flatMap((group: any) =>
+                      group && typeof group === 'object'
+                          ? Object.keys(group).map((key) => ({
+                                key,
+                                message: group[key],
+                            }))
+                          : [],
+                  )
+                : Object.keys(upstreamResponse || {}).map((key) => ({
+                      key,
+                      message: upstreamResponse[key],
+                  }));
+            const testMessages = statuses.map(({ key, message }) => {
                 if (message.startsWith('WARNING:')) {
                     dispatch(addErrorToast({ error: i18next.t('dns_test_warning_toast', { key }) }));
                 } else if (message.endsWith(': parsing error')) {

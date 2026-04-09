@@ -136,8 +136,9 @@
       'responses':
         '200':
           'description': >
-            Status of testing each requested server, with "OK" meaning that
-            server works, any other text means an error.
+            Status of testing each requested server grouped by configuration
+            section, with "OK" meaning that server works, any other text means
+            an error.
           'content':
             'application/json':
               'schema':
@@ -145,14 +146,17 @@
               'examples':
                 'response':
                   'value':
-                    '1.1.1.1': 'OK'
-                    '1.0.0.1': 'OK'
-                    '8.8.8.8': 'OK'
-                    '8.8.4.4': 'OK'
-                    '192.168.1.104:53535': >
-                      upstream "192.168.1.104:1234" fails to exchange: couldn't
-                      communicate with upstream: read udp
-                      192.168.1.100:60675->8.8.8.8:1234: i/o timeout
+                    'general':
+                      '1.1.1.1': 'OK'
+                      '1.0.0.1': 'OK'
+                    'fallback':
+                      '8.8.8.8': 'OK'
+                      '8.8.4.4': 'OK'
+                    'private':
+                      '192.168.1.104:53535': >
+                        upstream "192.168.1.104:1234" fails to exchange: couldn't
+                        communicate with upstream: read udp
+                        192.168.1.100:60675->8.8.8.8:1234: i/o timeout
   '/version.json':
     'post':
       'tags':
@@ -1695,8 +1699,19 @@
     'UpstreamsConfigResponse':
       'type': 'object'
       'description': 'Upstreams configuration response'
-      'additionalProperties':
-        'type': 'string'
+      'properties':
+        'general':
+          'type': 'object'
+          'additionalProperties':
+            'type': 'string'
+        'fallback':
+          'type': 'object'
+          'additionalProperties':
+            'type': 'string'
+        'private':
+          'type': 'object'
+          'additionalProperties':
+            'type': 'string'
     'Filter':
       'type': 'object'
       'description': 'Filter subscription info'

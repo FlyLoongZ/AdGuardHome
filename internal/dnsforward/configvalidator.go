@@ -248,14 +248,21 @@ const (
 	privateTextLabel  = "local_ptr_title"
 )
 
+// upstreamConfigValidatorStatus contains testing results grouped by upstream
+// configuration section.
+type upstreamConfigValidatorStatus struct {
+	General  map[string]string `json:"general,omitempty"`
+	Fallback map[string]string `json:"fallback,omitempty"`
+	Private  map[string]string `json:"private,omitempty"`
+}
+
 // status returns all the data collected during parsing, healthcheck, and
-// closing of the upstreams.  The returned map is keyed by the original upstream
-// configuration piece and contains the corresponding error or "OK" if there was
-// no error.  l must not be nil.
+// closing of the upstreams grouped by configuration section.  l must not be
+// nil.
 func (cv *upstreamConfigValidator) status(
 	ctx context.Context,
 	l *slog.Logger,
-) (results map[string]string) {
+) (status upstreamConfigValidatorStatus) {
 	// Names of the upstream configuration sections for logging.
 	const (
 		generalSection  = "general"
@@ -263,39 +270,39 @@ func (cv *upstreamConfigValidator) status(
 		privateSection  = "private"
 	)
 
-	results = map[string]string{}
+	status = upstreamConfigValidatorStatus{
+		General:  map[string]string{},
+		Fallback: map[string]string{},
+		Private:  map[string]string{},
+	}
 
 	for original, res := range cv.generalUpstreamResults {
-		upstreamResultToStatus(ctx, l, generalSection, string(original), res, results)
+		upstreamResultToStatus(ctx, l, generalSection, string(original), res, status.General)
 	}
 	for original, res := range cv.fallbackUpstreamResults {
-		upstreamResultToStatus(ctx, l, fallbackSection, string(original), res, results)
+		upstreamResultToStatus(ctx, l, fallbackSection, string(original), res, status.Fallback)
 	}
 	for original, res := range cv.privateUpstreamResults {
-		upstreamResultToStatus(ctx, l, privateSection, string(original), res, results)
+		upstreamResultToStatus(ctx, l, privateSection, string(original), res, status.Private)
 	}
 
-	parseResultToStatus(ctx, l, generalTextLabel, generalSection, cv.generalParseResults, results)
+	parseResultToStatus(ctx, l, generalTextLabel, generalSection, cv.generalParseResults, status.General)
 	parseResultToStatus(
 		ctx,
 		l,
 		fallbackTextLabel,
 		fallbackSection,
 		cv.fallbackParseResults,
-		results,
+		status.Fallback,
 	)
-	parseResultToStatus(ctx, l, privateTextLabel, privateSection, cv.privateParseResults, results)
+	parseResultToStatus(ctx, l, privateTextLabel, privateSection, cv.privateParseResults, status.Private)
 
-	return results
+	return status
 }
 
 // upstreamResultToStatus puts "OK" or an error message from res into resMap.
 // section is the name of the upstream configuration section, i.e. "general",
 // "fallback", or "private", and only used for logging.  l must not be nil.
-//
-// TODO(e.burkov):  Currently, the HTTP handler expects that all the results are
-// put together in a single map, which may lead to collisions, see AG-27539.
-// Improve the results compilation.
 func upstreamResultToStatus(
 	ctx context.Context,
 	l *slog.Logger,

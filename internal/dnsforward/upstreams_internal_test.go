@@ -15,6 +15,28 @@ import (
 )
 
 func TestUpstreamConfigValidator(t *testing.T) {
+	mkStatus := func(
+		general map[string]string,
+		fallback map[string]string,
+		private map[string]string,
+	) upstreamConfigValidatorStatus {
+		if general == nil {
+			general = map[string]string{}
+		}
+		if fallback == nil {
+			fallback = map[string]string{}
+		}
+		if private == nil {
+			private = map[string]string{}
+		}
+
+		return upstreamConfigValidatorStatus{
+			General:  general,
+			Fallback: fallback,
+			Private:  private,
+		}
+	}
+
 	goodHandler := dns.HandlerFunc(func(w dns.ResponseWriter, m *dns.Msg) {
 		err := w.WriteMsg(new(dns.Msg).SetReply(m))
 		require.NoError(testutil.PanicT{}, err)
@@ -40,7 +62,7 @@ func TestUpstreamConfigValidator(t *testing.T) {
 	const upsTimeout = 100 * time.Millisecond
 
 	testCases := []struct {
-		want     map[string]string
+		want     upstreamConfigValidatorStatus
 		name     string
 		general  []string
 		fallback []string
@@ -48,97 +70,117 @@ func TestUpstreamConfigValidator(t *testing.T) {
 	}{{
 		name:    "success",
 		general: []string{goodUps},
-		want: map[string]string{
+		want: mkStatus(map[string]string{
 			goodUps: "OK",
-		},
+		}, nil, nil),
 	}, {
 		name:    "broken",
 		general: []string{badUps},
-		want: map[string]string{
+		want: mkStatus(map[string]string{
 			badUps: `couldn't communicate with upstream: exchanging with ` +
 				badUps + ` over tcp: dns: id mismatch`,
-		},
+		}, nil, nil),
 	}, {
 		name:    "both",
 		general: []string{goodUps, badUps, goodUps},
-		want: map[string]string{
+		want: mkStatus(map[string]string{
 			goodUps: "OK",
 			badUps: `couldn't communicate with upstream: exchanging with ` +
 				badUps + ` over tcp: dns: id mismatch`,
-		},
+		}, nil, nil),
 	}, {
 		name:    "domain_specific_error",
 		general: []string{"[/domain.example/]" + badUps},
-		want: map[string]string{
+		want: mkStatus(map[string]string{
 			badUps: `WARNING: couldn't communicate ` +
 				`with upstream: exchanging with ` + badUps + ` over tcp: ` +
 				`dns: id mismatch`,
-		},
+		}, nil, nil),
 	}, {
 		name:     "fallback_success",
 		fallback: []string{goodUps},
-		want: map[string]string{
+		want: mkStatus(nil, map[string]string{
 			goodUps: "OK",
-		},
+		}, nil),
 	}, {
 		name:     "fallback_broken",
 		fallback: []string{badUps},
-		want: map[string]string{
+		want: mkStatus(nil, map[string]string{
 			badUps: `couldn't communicate with upstream: exchanging with ` +
 				badUps + ` over tcp: dns: id mismatch`,
-		},
+		}, nil),
 	}, {
 		name:    "multiple_domain_specific_upstreams",
 		general: []string{"[/domain.example/]" + goodAndBadUps},
-		want: map[string]string{
+		want: mkStatus(map[string]string{
 			goodUps: "OK",
 			badUps: `WARNING: couldn't communicate ` +
 				`with upstream: exchanging with ` + badUps + ` over tcp: ` +
 				`dns: id mismatch`,
-		},
+		}, nil, nil),
 	}, {
 		name:    "bad_specification",
 		general: []string{"[/domain.example/]/]1.2.3.4"},
-		want: map[string]string{
+		want: mkStatus(map[string]string{
 			"[/domain.example/]/]1.2.3.4": generalTextLabel + " 1: parsing error",
-		},
+		}, nil, nil),
 	}, {
 		name:     "all_different",
 		general:  []string{"[/domain.example/]" + goodAndBadUps},
 		fallback: []string{"[/domain.example/]" + goodAndBadUps},
 		private:  []string{"[/domain.example/]" + goodAndBadUps},
-		want: map[string]string{
-			goodUps: "OK",
-			badUps: `WARNING: couldn't communicate ` +
-				`with upstream: exchanging with ` + badUps + ` over tcp: ` +
-				`dns: id mismatch`,
-		},
+		want: mkStatus(
+			map[string]string{
+				goodUps: "OK",
+				badUps: `WARNING: couldn't communicate ` +
+					`with upstream: exchanging with ` + badUps + ` over tcp: ` +
+					`dns: id mismatch`,
+			},
+			map[string]string{
+				goodUps: "OK",
+				badUps: `WARNING: couldn't communicate ` +
+					`with upstream: exchanging with ` + badUps + ` over tcp: ` +
+					`dns: id mismatch`,
+			},
+			map[string]string{
+				goodUps: "OK",
+				badUps: `WARNING: couldn't communicate ` +
+					`with upstream: exchanging with ` + badUps + ` over tcp: ` +
+					`dns: id mismatch`,
+			},
+		),
 	}, {
 		name:     "bad_specific_domains",
 		general:  []string{"[/example/]/]" + goodUps},
 		fallback: []string{"[/example/" + goodUps},
 		private:  []string{"[/example//bad.123/]" + goodUps},
-		want: map[string]string{
-			"[/example/]/]" + goodUps:        generalTextLabel + " 1: parsing error",
-			"[/example/" + goodUps:           fallbackTextLabel + " 1: parsing error",
-			"[/example//bad.123/]" + goodUps: privateTextLabel + " 1: parsing error",
-		},
+		want: mkStatus(
+			map[string]string{
+				"[/example/]/]" + goodUps: generalTextLabel + " 1: parsing error",
+			},
+			map[string]string{
+				"[/example/" + goodUps: fallbackTextLabel + " 1: parsing error",
+			},
+			map[string]string{
+				"[/example//bad.123/]" + goodUps: privateTextLabel + " 1: parsing error",
+			},
+		),
 	}, {
 		name: "bad_proto",
 		general: []string{
 			"bad://1.2.3.4",
 		},
-		want: map[string]string{
+		want: mkStatus(map[string]string{
 			"bad://1.2.3.4": generalTextLabel + " 1: parsing error",
-		},
+		}, nil, nil),
 	}, {
 		name: "truncated_line",
 		general: []string{
 			"This is a very long line.  It will cause a parsing error and will be truncated here.",
 		},
-		want: map[string]string{
+		want: mkStatus(map[string]string{
 			"This is a very long line.  It will cause a parsing error and will be truncated …": "upstream_dns 1: parsing error",
-		},
+		}, nil, nil),
 	}}
 
 	for _, tc := range testCases {
@@ -179,8 +221,12 @@ func TestUpstreamConfigValidator_Check_once(t *testing.T) {
 	}).String()
 	twoAddrs := strings.Join([]string{addr, addr}, " ")
 
-	wantStatus := map[string]string{
-		addr: "OK",
+	wantStatus := upstreamConfigValidatorStatus{
+		General: map[string]string{
+			addr: "OK",
+		},
+		Fallback: map[string]string{},
+		Private:  map[string]string{},
 	}
 
 	testCases := []struct {
