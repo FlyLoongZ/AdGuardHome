@@ -534,6 +534,9 @@ func (s *Server) dhcpHostFromRequest(q *dns.Question) (reqHost string) {
 
 // setCustomUpstream sets custom upstream settings in pctx, if necessary.
 func (s *Server) setCustomUpstream(ctx context.Context, pctx *proxy.DNSContext, clientID string) {
+	s.serverLock.RLock()
+	defer s.serverLock.RUnlock()
+
 	if !pctx.Addr.IsValid() || s.conf.ClientsContainer == nil {
 		return
 	}
