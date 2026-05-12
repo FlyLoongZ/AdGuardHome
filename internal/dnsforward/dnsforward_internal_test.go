@@ -80,12 +80,6 @@ type clientsContainer struct {
 		cliAddr netip.Addr,
 	) (conf *proxy.CustomUpstreamConfig)
 
-	OnHasCustomDomainSpecificUpstream func(
-		clientID string,
-		cliAddr netip.Addr,
-		fqdn string,
-	) (ok bool)
-
 	OnUpdateCommonUpstreamConfig func(conf *client.CommonUpstreamConfig)
 
 	OnClearUpstreamCache func()
@@ -98,20 +92,6 @@ func (c *clientsContainer) CustomUpstreamConfig(
 	cliAddr netip.Addr,
 ) (conf *proxy.CustomUpstreamConfig) {
 	return c.OnCustomUpstreamConfig(clientID, cliAddr)
-}
-
-// HasCustomDomainSpecificUpstream implements the [ClientsContainer] interface
-// for *clientsContainer.
-func (c *clientsContainer) HasCustomDomainSpecificUpstream(
-	clientID string,
-	cliAddr netip.Addr,
-	fqdn string,
-) (ok bool) {
-	if c.OnHasCustomDomainSpecificUpstream == nil {
-		return false
-	}
-
-	return c.OnHasCustomDomainSpecificUpstream(clientID, cliAddr, fqdn)
 }
 
 // UpdateCommonUpstreamConfig implements the [ClientsContainer] interface for
@@ -571,8 +551,8 @@ func TestNewSourceManager_LoadsMetadataFromCache(t *testing.T) {
 		SafeFSPatterns: []string{filepath.Join(t.TempDir(), "*")},
 		Config: Config{
 			UpstreamDNSSources: []UpstreamDNSSourceYAML{{
-				Enabled:           true,
-				URL:               "https://example.test/source.txt",
+				Enabled: true,
+				URL:     "https://example.test/source.txt",
 				UpstreamDNSSource: UpstreamDNSSource{ID: 1},
 			}},
 		},
