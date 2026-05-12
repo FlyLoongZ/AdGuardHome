@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/AdguardTeam/AdGuardHome/internal/aghnet"
@@ -53,6 +54,10 @@ type customUpstreamConfig struct {
 
 	// isChanged indicates whether the proxyConf needs to be updated.
 	isChanged bool
+
+	// createMu prevents duplicate proxyConf creation when multiple goroutines
+	// concurrently try to build the upstream config for the same client.
+	createMu sync.Mutex
 }
 
 // upstreamManager stores and updates custom client upstream configurations.
@@ -159,6 +164,63 @@ func (m *upstreamManager) customUpstreamConfig(
 // upstream configuration.
 func (m *upstreamManager) isConfigChanged(cliConf *customUpstreamConfig) (ok bool) {
 	return !m.confUpdate.Equal(cliConf.commonConfUpdate) || cliConf.isChanged
+}
+
+// buildCustomUpstreamConfig creates or returns the cached custom client
+// upstream configuration.  Unlike [upstreamManager.customUpstreamConfig], this
+// method may be safely called without holding [Storage.mu] as it uses
+// per-client [sync.Mutex] to prevent duplicate creation.  All parameters except
+// cliConf and clientName must be snapshots taken under [Storage.mu].
+func (m *upstreamManager) buildCustomUpstreamConfig(
+	cliConf *customUpstreamConfig,
+	clientName string,
+	upstreams []string,
+	cacheSize uint32,
+	cacheEnabled bool,
+	commonConf CommonUpstreamConfig,
+	confUpdate time.Time,
+) (proxyConf *proxy.CustomUpstreamConfig) {
+	cliConf.createMu.Lock()
+	defer cliConf.createMu.Unlock()
+
+	// Double-check under per-client lock: another goroutine may have
+	// updated the config while we were waiting.
+	if !cliConf.isChanged && confUpdate.Equal(cliConf.commonConfUpdate) {
+		return cliConf.proxyConf
+	}
+
+	upstreams = stringutil.FilterOut(upstreams, aghnet.IsCommentOrEmpty)
+	if len(upstreams) == 0 {
+		return nil
+	}
+
+	cliLogger := aghslog.NewForUpstream(m.baseLogger, aghslog.UpstreamTypeCustom).With(
+		aghslog.KeyClientName,
+		clientName,
+	)
+
+	upsConf, err := proxy.ParseUpstreamsConfig(
+		upstreams,
+		&upstream.Options{
+			Logger:       cliLogger,
+			Bootstrap:    commonConf.Bootstrap,
+			Timeout:      commonConf.UpstreamTimeout,
+			HTTPVersions: aghnet.UpstreamHTTPVersions(commonConf.UseHTTP3Upstreams),
+			PreferIPv6:   commonConf.BootstrapPreferIPv6,
+		},
+	)
+	if err != nil {
+		// Should not happen because upstreams are already validated.  See
+		// [Persistent.validate].
+		panic(fmt.Errorf("creating custom upstream config: %w", err))
+	}
+
+	return proxy.NewCustomUpstreamConfig(
+		upsConf,
+		cacheEnabled,
+		int(cacheSize),
+		commonConf.EDNSClientSubnetEnabled,
+	)
 }
 
 // clearUpstreamCache clears the upstream cache for each stored custom client

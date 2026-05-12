@@ -732,7 +732,6 @@ func (s *Storage) CustomUpstreamConfig(
 	addr netip.Addr,
 ) (prxConf *proxy.CustomUpstreamConfig) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	c, ok := s.index.findByClientID(ClientID(id))
 	if !ok {
@@ -740,10 +739,68 @@ func (s *Storage) CustomUpstreamConfig(
 	}
 
 	if !ok {
+		s.mu.Unlock()
+
 		return nil
 	}
 
-	return s.upstreamManager.customUpstreamConfig(c.UID, c.Name)
+	cliConf, ok := s.upstreamManager.uidToCustomConf[c.UID]
+	if !ok {
+		s.mu.Unlock()
+
+		return nil
+	}
+
+	if !s.upstreamManager.isConfigChanged(cliConf) {
+		pc := cliConf.proxyConf
+		s.mu.Unlock()
+
+		return pc
+	}
+
+	// Snapshot data needed for config creation under lock, then release.
+	// newCustomUpstreamConfig may perform DNS/network I/O (bootstrap).
+	upstreams := slices.Clone(cliConf.upstreams)
+	cacheSize := cliConf.upstreamsCacheSize
+	cacheEnabled := cliConf.upstreamsCacheEnabled
+	commonConfUpdate := s.upstreamManager.confUpdate
+	commonConf := *s.upstreamManager.commonConf
+	s.mu.Unlock()
+
+	// Create upstream config outside the lock.
+	newConf := s.upstreamManager.buildCustomUpstreamConfig(
+		cliConf,
+		c.Name,
+		upstreams,
+		cacheSize,
+		cacheEnabled,
+		commonConf,
+		commonConfUpdate,
+	)
+
+	// Re-acquire lock to store the result.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Double-check: if another goroutine already updated the config for the
+	// same common config snapshot, discard our work and use the existing one.
+	if !s.upstreamManager.isConfigChanged(cliConf) {
+		if newConf != nil {
+			_ = newConf.Close()
+		}
+
+		return cliConf.proxyConf
+	}
+
+	// Store the freshly built config.
+	if cliConf.proxyConf != nil {
+		_ = cliConf.proxyConf.Close()
+	}
+	cliConf.proxyConf = newConf
+	cliConf.commonConfUpdate = s.upstreamManager.confUpdate
+	cliConf.isChanged = false
+
+	return newConf
 }
 
 // UpdateCommonUpstreamConfig implements the [dnsforward.ClientsContainer]
