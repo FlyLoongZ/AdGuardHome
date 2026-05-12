@@ -1,8 +1,8 @@
 {
   "all_right": {
     "upstream_dns": [
-      "8.8.8.8:53",
-      "8.8.4.4:53"
+      "114.114.114.114:53",
+      "223.5.5.5:53"
     ],
     "upstream_dns_file": "",
     "bootstrap_dns": [
@@ -42,8 +42,8 @@
   },
   "fastest_addr": {
     "upstream_dns": [
-      "8.8.8.8:53",
-      "8.8.4.4:53"
+      "114.114.114.114:53",
+      "223.5.5.5:53"
     ],
     "upstream_dns_file": "",
     "bootstrap_dns": [
@@ -83,8 +83,8 @@
   },
   "parallel": {
     "upstream_dns": [
-      "8.8.8.8:53",
-      "8.8.4.4:53"
+      "114.114.114.114:53",
+      "223.5.5.5:53"
     ],
     "upstream_dns_file": "",
     "bootstrap_dns": [

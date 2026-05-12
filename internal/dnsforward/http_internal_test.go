@@ -82,7 +82,7 @@ func TestDNSForwardHTTP_handleGetConfig(t *testing.T) {
 		TCPListenAddrs: []*net.TCPAddr{},
 		TLSConf:        &TLSConfig{},
 		Config: Config{
-			UpstreamDNS:            []string{"8.8.8.8:53", "8.8.4.4:53"},
+			UpstreamDNS:            []string{"114.114.114.114:53", "223.5.5.5:53"},
 			FallbackDNS:            []string{"9.9.9.10"},
 			RatelimitSubnetLenIPv4: 24,
 			RatelimitSubnetLenIPv6: 56,
@@ -186,7 +186,7 @@ func TestDNSForwardHTTP_handleSetConfig(t *testing.T) {
 		TCPListenAddrs: []*net.TCPAddr{},
 		TLSConf:        &TLSConfig{},
 		Config: Config{
-			UpstreamDNS:            []string{"8.8.8.8:53", "8.8.4.4:53"},
+			UpstreamDNS:            []string{"114.114.114.114:53", "223.5.5.5:53"},
 			RatelimitSubnetLenIPv4: 24,
 			RatelimitSubnetLenIPv6: 56,
 			UpstreamMode:           UpstreamModeLoadBalance,
@@ -449,7 +449,9 @@ func TestServer_HandleTestUpstreamDNS(t *testing.T) {
 			"upstream_dns": []string{hostsUps},
 		},
 		wantResp: map[string]any{
-			hostsUps: "OK",
+			"general": map[string]any{
+				hostsUps: "OK",
+			},
 		},
 		name: "etc_hosts",
 	}, {
@@ -457,7 +459,9 @@ func TestServer_HandleTestUpstreamDNS(t *testing.T) {
 			"upstream_dns": []string{ups, "#this.is.comment"},
 		},
 		wantResp: map[string]any{
-			ups: "OK",
+			"general": map[string]any{
+				ups: "OK",
+			},
 		},
 		name: "comment_mix",
 	}}
@@ -517,8 +521,11 @@ func TestServer_HandleTestUpstreamDNS(t *testing.T) {
 		err = json.NewDecoder(w.Body).Decode(&resp)
 		require.NoError(t, err)
 
-		require.Contains(t, resp, sleepyUps)
-		sleepyRes := testutil.RequireTypeAssert[string](t, resp[sleepyUps])
+		general, ok := resp["general"].(map[string]any)
+		require.True(t, ok)
+
+		require.Contains(t, general, sleepyUps)
+		sleepyRes := testutil.RequireTypeAssert[string](t, general[sleepyUps])
 
 		assert.True(t, strings.HasSuffix(sleepyRes, "i/o timeout"))
 	})
@@ -538,7 +545,7 @@ func TestServer_UpstreamSourcesHTTP(t *testing.T) {
 		BlockingMode:     filtering.BlockingModeDefault,
 	}, ServerConfig{
 		Config: Config{
-			UpstreamDNS:      []string{"8.8.8.8:53"},
+			UpstreamDNS:      []string{"114.114.114.114:53"},
 			UpstreamMode:     UpstreamModeLoadBalance,
 			EDNSClientSubnet: &EDNSClientSubnet{},
 			ClientsContainer: EmptyClientsContainer{},
@@ -706,7 +713,7 @@ func TestServer_HandleTestUpstreamDNS_WithSources(t *testing.T) {
 		BlockingMode:     filtering.BlockingModeDefault,
 	}, ServerConfig{
 		Config: Config{
-			UpstreamDNS: []string{"8.8.8.8:53"},
+			UpstreamDNS: []string{"114.114.114.114:53"},
 			UpstreamMode: UpstreamModeLoadBalance,
 			UpstreamDNSSources: []UpstreamDNSSourceYAML{{
 				Enabled: true,
@@ -726,7 +733,7 @@ func TestServer_HandleTestUpstreamDNS_WithSources(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/control/test_upstream_dns", io.NopCloser(bytes.NewReader([]byte(`{
-		"upstream_dns": ["8.8.8.8:53"],
+		"upstream_dns": ["114.114.114.114:53"],
 		"bootstrap_dns": [],
 		"fallback_dns": [],
 		"private_upstream": []
@@ -735,9 +742,10 @@ func TestServer_HandleTestUpstreamDNS_WithSources(t *testing.T) {
 	srv.handleTestUpstreamDNS(w, req.WithContext(ctx))
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	srv.conf.UpstreamDNSFileName = "/tmp/non-existing-upstreams-file"
+	srv.conf.UpstreamDNSFileName = filepath.Join(tmpDir, "upstreams-file.txt")
+	require.NoError(t, os.WriteFile(srv.conf.UpstreamDNSFileName, []byte("114.114.114.114:53\n"), 0o644))
 	req = httptest.NewRequest(http.MethodPost, "/control/test_upstream_dns", io.NopCloser(bytes.NewReader([]byte(`{
-		"upstream_dns": ["8.8.8.8:53"],
+		"upstream_dns": ["114.114.114.114:53"],
 		"bootstrap_dns": [],
 		"fallback_dns": [],
 		"private_upstream": []
@@ -767,7 +775,7 @@ func TestServer_HandleUpstreamDNSSources_RejectsUnsafeAndInvalidContent(t *testi
 		DataDir:          filterDataDir,
 	}, ServerConfig{
 		Config: Config{
-			UpstreamDNS:      []string{"8.8.8.8:53"},
+			UpstreamDNS:      []string{"114.114.114.114:53"},
 			UpstreamMode:     UpstreamModeLoadBalance,
 			EDNSClientSubnet: &EDNSClientSubnet{},
 			ClientsContainer: EmptyClientsContainer{},
@@ -824,7 +832,7 @@ func TestServer_HandleUpstreamDNSSources_RefreshPartialSuccess(t *testing.T) {
 		BlockingMode:     filtering.BlockingModeDefault,
 	}, ServerConfig{
 		Config: Config{
-			UpstreamDNS: []string{"8.8.8.8:53"},
+			UpstreamDNS: []string{"114.114.114.114:53"},
 			UpstreamMode: UpstreamModeLoadBalance,
 			UpstreamDNSSources: []UpstreamDNSSourceYAML{{
 				Enabled: true,

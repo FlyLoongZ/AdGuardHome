@@ -518,7 +518,7 @@ func TestServer_Reconfigure_RollbackOnPrepareFailure(t *testing.T) {
 	goodConf := &ServerConfig{
 		TLSConf: &TLSConfig{},
 		Config: Config{
-			UpstreamDNS:      []string{"8.8.8.8:53"},
+			UpstreamDNS:      []string{"114.114.114.114:53"},
 			UpstreamMode:     UpstreamModeLoadBalance,
 			EDNSClientSubnet: &EDNSClientSubnet{Enabled: false},
 			ClientsContainer: EmptyClientsContainer{},
@@ -655,7 +655,7 @@ func TestServerRace(t *testing.T) {
 		TCPListenAddrs: []*net.TCPAddr{{}},
 		Config: Config{
 			UpstreamMode: UpstreamModeLoadBalance,
-			UpstreamDNS:  []string{"8.8.8.8:53", "8.8.4.4:53"},
+			UpstreamDNS:  []string{"114.114.114.114:53", "223.5.5.5:53"},
 		},
 		ConfModifier:  agh.EmptyConfigModifier{},
 		ServePlainDNS: true,
@@ -1196,7 +1196,7 @@ func TestBlockedCustomIP(t *testing.T) {
 		TCPListenAddrs: []*net.TCPAddr{{}},
 		TLSConf:        &TLSConfig{},
 		Config: Config{
-			UpstreamDNS:  []string{"8.8.8.8:53", "8.8.4.4:53"},
+			UpstreamDNS:  []string{"114.114.114.114:53", "223.5.5.5:53"},
 			UpstreamMode: UpstreamModeLoadBalance,
 			EDNSClientSubnet: &EDNSClientSubnet{
 				Enabled: false,
@@ -1403,7 +1403,7 @@ func TestRewrite(t *testing.T) {
 		TCPListenAddrs: []*net.TCPAddr{{}},
 		TLSConf:        &TLSConfig{},
 		Config: Config{
-			UpstreamDNS:  []string{"8.8.8.8:53"},
+			UpstreamDNS:  []string{"114.114.114.114:53"},
 			UpstreamMode: UpstreamModeLoadBalance,
 			EDNSClientSubnet: &EDNSClientSubnet{
 				Enabled: false,
