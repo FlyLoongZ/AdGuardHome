@@ -378,8 +378,6 @@ func (m *sourceManager) commit(src *UpstreamDNSSourceYAML, p sourcePrepared) (up
 		if statErr == nil {
 			_ = os.Remove(p.tmpPath)
 
-			src.LastUpdated = p.lastUpdated
-
 			return false, nil
 		} else if !stderrors.Is(statErr, os.ErrNotExist) {
 			return false, fmt.Errorf("checking source cache: %w", statErr)
@@ -708,10 +706,10 @@ func (m *sourceManager) stageRefresh(ctx context.Context, force bool) (res sourc
 		src.ensureName(p.name)
 		src.RulesCount = p.count
 		src.checksum = p.checksum
-		src.LastUpdated = p.lastUpdated
 		prepared[i] = p
 
 		if wasUpdated {
+			src.LastUpdated = p.lastUpdated
 			updated++
 		}
 	}
