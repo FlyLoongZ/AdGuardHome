@@ -223,9 +223,13 @@ func (m *sourceManager) cacheDir() string {
 func validateSourceURL(urlStr string, safeFSPatterns []string) (err error) {
 	if filepath.IsAbs(urlStr) {
 		urlStr = filepath.Clean(urlStr)
-		_, err = os.Stat(urlStr)
+		fi, err := os.Stat(urlStr)
 		if err != nil {
 			return err
+		}
+
+		if fi.IsDir() {
+			return fmt.Errorf("path %q is a directory, not a file", urlStr)
 		}
 
 		if !pathMatchesAny(safeFSPatterns, urlStr) {
