@@ -368,12 +368,18 @@ func (m *sourceManager) commit(src *UpstreamDNSSourceYAML, p sourcePrepared) (up
 	if p.checksum == p.prevChecksum {
 		_, statErr := os.Stat(dst)
 		if statErr == nil {
+			// 缓存存在且内容未变 → 跳过写入
 			_ = os.Remove(p.tmpPath)
 
 			return false, nil
-		} else if !stderrors.Is(statErr, os.ErrNotExist) {
+		}
+
+		if !stderrors.Is(statErr, os.ErrNotExist) {
 			return false, fmt.Errorf("checking source cache: %w", statErr)
 		}
+
+		// 缓存文件不存在（ErrNotExist）→ 从 tmpPath 重建
+		// 新源或缓存目录清理后均会进入此路径
 	}
 
 	err = os.Rename(p.tmpPath, dst)
