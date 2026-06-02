@@ -160,7 +160,6 @@ type sourcePrepared struct {
 	prevChecksum  uint32
 	name          string
 	lastUpdated   time.Time
-	upstreamLines []string
 }
 
 type sourceStageResult struct {
@@ -364,7 +363,6 @@ func (m *sourceManager) prepare(ctx context.Context, src UpstreamDNSSourceYAML) 
 		checksum:      checksum,
 		name:          title,
 		lastUpdated:   time.Now(),
-		upstreamLines: lines,
 	}
 
 	return p, nil
