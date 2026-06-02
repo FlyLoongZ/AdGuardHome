@@ -3,12 +3,10 @@ package home
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -31,8 +29,6 @@ func TestWeb_HandleGetProfile(t *testing.T) {
 	const (
 		testTTL = 60
 
-		glTokenFileSuffix = "test"
-
 		userName     = "name"
 		userPassword = "password"
 
@@ -43,14 +39,6 @@ func TestWeb_HandleGetProfile(t *testing.T) {
 	require.NoError(t, err)
 
 	tempDir := t.TempDir()
-	glFilePrefix = tempDir + "/gl_token_"
-	glTokenFile := glFilePrefix + glTokenFileSuffix
-
-	glFileData := make([]byte, 4)
-	binary.NativeEndian.PutUint32(glFileData, uint32(time.Now().Unix()+testTTL))
-
-	err = os.WriteFile(glTokenFile, glFileData, 0o644)
-	require.NoError(t, err)
 
 	sessionsDB := filepath.Join(tempDir, "sessions.db")
 
@@ -59,8 +47,11 @@ func TestWeb_HandleGetProfile(t *testing.T) {
 		PasswordHash: string(passwordHash),
 	}
 
+	baseMux := http.NewServeMux()
+
 	auth, err := newAuth(testutil.ContextWithTimeout(t, testTimeout), &authConfig{
 		baseLogger:     testLogger,
+		mux:            baseMux,
 		rateLimiter:    emptyRateLimiter{},
 		trustedProxies: testTrustedProxies,
 		dbFilename:     sessionsDB,
@@ -71,8 +62,6 @@ func TestWeb_HandleGetProfile(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() { auth.close(testutil.ContextWithTimeout(t, testTimeout)) })
-
-	baseMux := http.NewServeMux()
 
 	tlsMgr, err := newTLSManager(testutil.ContextWithTimeout(t, testTimeout), &tlsManagerConfig{
 		logger:       testLogger,

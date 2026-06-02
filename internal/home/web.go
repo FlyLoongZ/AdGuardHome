@@ -25,6 +25,8 @@ import (
 	"github.com/NYTimes/gziphandler"
 	"github.com/quic-go/quic-go/http3"
 	"golang.org/x/net/http2"
+
+	//lint:ignore SA1019 See AGDNS-4038.
 	"golang.org/x/net/http2/h2c"
 )
 
@@ -262,7 +264,7 @@ func (web *webAPI) start(ctx context.Context) {
 
 	// this loop is used as an ability to change listening host and/or port
 	for !web.httpsServer.inShutdown {
-		printHTTPAddresses(urlutil.SchemeHTTP, web.tlsManager)
+		printHTTPAddresses(ctx, web.logger, urlutil.SchemeHTTP, web.tlsManager)
 		errs := make(chan error, 2)
 
 		hdlr := withMiddlewares(web.conf.mux, limitRequestBody)
@@ -279,6 +281,8 @@ func (web *webAPI) start(ctx context.Context) {
 		//
 		// NOTE:  The auth middleware must be inside the h2c handler to ensure
 		// it applies to upgraded HTTP/2 connections as well.  See AG-51779.
+		//
+		//lint:ignore SA1019 See AGDNS-4038.
 		hdlr = h2c.NewHandler(hdlr, &http2.Server{})
 
 		// Create a new instance, because the Web is not usable after Shutdown.
@@ -381,7 +385,7 @@ func (web *webAPI) serveTLS(ctx context.Context) (next bool) {
 		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelError),
 	}
 
-	printHTTPAddresses(urlutil.SchemeHTTPS, web.tlsManager)
+	printHTTPAddresses(ctx, web.logger, urlutil.SchemeHTTPS, web.tlsManager)
 
 	if web.conf.serveHTTP3 {
 		go web.mustStartHTTP3(ctx, addr)

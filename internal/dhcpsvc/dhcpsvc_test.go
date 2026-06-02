@@ -15,6 +15,7 @@ import (
 	"github.com/AdguardTeam/golibs/logutil/slogutil"
 	"github.com/AdguardTeam/golibs/testutil"
 	"github.com/AdguardTeam/golibs/testutil/faketime"
+	"github.com/AdguardTeam/golibs/testutil/servicetest"
 	"github.com/AdguardTeam/golibs/timeutil"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -121,6 +122,17 @@ var (
 		Enabled:       true,
 	}
 
+	// testIPv6Conf is a common valid IPv6 part of the interface configuration
+	// for tests.
+	testIPv6Conf = &dhcpsvc.IPv6Config{
+		Enabled:       true,
+		Clock:         testClock,
+		RangeStart:    netip.MustParseAddr(testRangeStartV6Str),
+		LeaseDuration: testLeaseTTL,
+		RAAllowSLAAC:  true,
+		RASLAACOnly:   true,
+	}
+
 	// testIfaceAddr is a common valid IPv4 address of the test network
 	// interface, compliant with [testIPv4Conf], i.e. outside of the range,
 	// within the subnet, not equal to the gateway.
@@ -130,16 +142,6 @@ var (
 	// interface.
 	testIfaceHWAddr = net.HardwareAddr{0x01, 0x01, 0x01, 0x01, 0x01, 0x01}
 )
-
-// testIPv6Conf is a common valid IPv6 part of the interface configuration for
-// tests.
-var testIPv6Conf = &dhcpsvc.IPv6Config{
-	Enabled:       true,
-	RangeStart:    netip.MustParseAddr(testRangeStartV6Str),
-	LeaseDuration: testLeaseTTL,
-	RAAllowSLAAC:  true,
-	RASLAACOnly:   true,
-}
 
 // testInterfaceConf is a common valid set of interface configurations for
 // tests.
@@ -160,6 +162,7 @@ var testInterfaceConf = map[string]*dhcpsvc.InterfaceConfig{
 		},
 		IPv6: &dhcpsvc.IPv6Config{
 			Enabled:       true,
+			Clock:         timeutil.SystemClock{},
 			RangeStart:    netip.MustParseAddr(testAnotherRangeStartV6Str),
 			LeaseDuration: 1 * time.Hour,
 			RAAllowSLAAC:  true,
@@ -225,4 +228,10 @@ func newTestDHCPServer(tb testing.TB, conf *dhcpsvc.Config) (srv *dhcpsvc.DHCPSe
 	require.NoError(tb, err)
 
 	return srv
+}
+
+// startTestDHCPServer creates a new DHCPServer for testing and starts it,
+// adding a cleanup function to stop the server on test completion.
+func startTestDHCPServer(tb testing.TB, conf *dhcpsvc.Config) {
+	servicetest.RequireRun(tb, newTestDHCPServer(tb, conf), testTimeout)
 }
