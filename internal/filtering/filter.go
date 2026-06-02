@@ -579,7 +579,7 @@ func (d *DNSFilter) reader(fltURL string) (r io.ReadCloser, err error) {
 	}
 
 	fltURL = filepath.Clean(fltURL)
-	if !pathMatchesAny(d.safeFSPatterns, fltURL) {
+	if !PathMatchesAny(d.safeFSPatterns, fltURL) {
 		return nil, fmt.Errorf("path %q does not match safe patterns", fltURL)
 	}
 

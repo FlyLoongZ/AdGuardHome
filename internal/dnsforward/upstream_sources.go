@@ -19,6 +19,7 @@ import (
 
 	"github.com/AdguardTeam/AdGuardHome/internal/aghnet"
 	"github.com/AdguardTeam/AdGuardHome/internal/aghos"
+	"github.com/AdguardTeam/AdGuardHome/internal/filtering"
 	"github.com/AdguardTeam/dnsproxy/proxy"
 	"github.com/AdguardTeam/dnsproxy/upstream"
 	"github.com/AdguardTeam/golibs/errors"
@@ -87,7 +88,7 @@ func (s *UpstreamDNSSourceYAML) clone() (clone UpstreamDNSSourceYAML) {
 func sourceReader(ctx context.Context, httpClient *http.Client, srcURL string, safeFSPatterns []string) (r io.ReadCloser, err error) {
 	if filepath.IsAbs(srcURL) {
 		path := filepath.Clean(srcURL)
-		if !pathMatchesAny(safeFSPatterns, path) {
+		if !filtering.PathMatchesAny(safeFSPatterns, path) {
 			return nil, fmt.Errorf("path %q does not match safe patterns", path)
 		}
 
@@ -125,32 +126,6 @@ func sourceReader(ctx context.Context, httpClient *http.Client, srcURL string, s
 	}
 
 	return resp.Body, nil
-}
-
-func pathMatchesAny(globs []string, filePath string) (ok bool) {
-	if len(globs) == 0 {
-		return false
-	}
-
-	clean, err := filepath.Abs(filePath)
-	if err != nil {
-		panic(fmt.Errorf("pathMatchesAny: %w", err))
-	} else if clean != filePath {
-		panic(fmt.Errorf("pathMatchesAny: filepath %q is not absolute", filePath))
-	}
-
-	for _, g := range globs {
-		ok, err = filepath.Match(g, filePath)
-		if err != nil {
-			panic(fmt.Errorf("pathMatchesAny: bad pattern: %w", err))
-		}
-
-		if ok {
-			return true
-		}
-	}
-
-	return false
 }
 
 type sourcePrepared struct {
@@ -234,7 +209,7 @@ func validateSourceURL(urlStr string, safeFSPatterns []string) (err error) {
 			return fmt.Errorf("path %q is a directory, not a file", urlStr)
 		}
 
-		if !pathMatchesAny(safeFSPatterns, urlStr) {
+		if !filtering.PathMatchesAny(safeFSPatterns, urlStr) {
 			return fmt.Errorf("path %q does not match safe patterns", urlStr)
 		}
 

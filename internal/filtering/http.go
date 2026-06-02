@@ -34,7 +34,7 @@ func (d *DNSFilter) validateFilterURL(urlStr string) (err error) {
 			return err
 		}
 
-		if !pathMatchesAny(d.safeFSPatterns, urlStr) {
+		if !PathMatchesAny(d.safeFSPatterns, urlStr) {
 			return fmt.Errorf("path %q does not match safe patterns", urlStr)
 		}
 

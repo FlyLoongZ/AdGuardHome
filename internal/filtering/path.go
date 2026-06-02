@@ -5,12 +5,12 @@ import (
 	"path/filepath"
 )
 
-// pathMatchesAny returns true if filePath matches one of globs.  globs must be
+// PathMatchesAny returns true if filePath matches one of globs.  globs must be
 // valid.  filePath must be absolute and clean.  If globs are empty,
-// pathMatchesAny returns false.
+// PathMatchesAny returns false.
 //
 // TODO(a.garipov): Move to golibs?
-func pathMatchesAny(globs []string, filePath string) (ok bool) {
+func PathMatchesAny(globs []string, filePath string) (ok bool) {
 	if len(globs) == 0 {
 		return false
 	}

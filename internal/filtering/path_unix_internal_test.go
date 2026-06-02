@@ -56,7 +56,7 @@ func TestPathInAnyDir(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			tc.want(t, pathMatchesAny(tc.globs, tc.filePath))
+			tc.want(t, PathMatchesAny(tc.globs, tc.filePath))
 		})
 	}
 
@@ -64,7 +64,7 @@ func TestPathInAnyDir(t *testing.T) {
 		t.Parallel()
 
 		assert.Panics(t, func() {
-			_ = pathMatchesAny([]string{"/home/user"}, "../../etc/passwd")
+			_ = PathMatchesAny([]string{"/home/user"}, "../../etc/passwd")
 		})
 	}))
 
@@ -72,7 +72,7 @@ func TestPathInAnyDir(t *testing.T) {
 		t.Parallel()
 
 		assert.Panics(t, func() {
-			_ = pathMatchesAny([]string{`\`}, filePath)
+			_ = PathMatchesAny([]string{`\`}, filePath)
 		})
 	}))
 }
