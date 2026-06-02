@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -83,50 +82,6 @@ func (s *UpstreamDNSSourceYAML) clone() (clone UpstreamDNSSourceYAML) {
 	return clone
 }
 
-// sourceReader returns an io.ReadCloser for the source URL or absolute file path.
-func sourceReader(ctx context.Context, httpClient *http.Client, srcURL string, safeFSPatterns []string) (r io.ReadCloser, err error) {
-	if filepath.IsAbs(srcURL) {
-		path := filepath.Clean(srcURL)
-		if !filtering.PathMatchesAny(safeFSPatterns, path) {
-			return nil, fmt.Errorf("path %q does not match safe patterns", path)
-		}
-
-		r, err = os.Open(path)
-		if err != nil {
-			return nil, fmt.Errorf("opening file: %w", err)
-		}
-
-		return r, nil
-	}
-
-	u, err := url.ParseRequestURI(srcURL)
-	if err != nil {
-		return nil, err
-	}
-
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return nil, fmt.Errorf("unsupported scheme %q", u.Scheme)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srcURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
-	}
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		_ = resp.Body.Close()
-
-		return nil, fmt.Errorf("got status code %d, want %d", resp.StatusCode, http.StatusOK)
-	}
-
-	return resp.Body, nil
-}
-
 type sourcePrepared struct {
 	tmpPath       string
 	count         int
@@ -152,11 +107,12 @@ type sourceManager struct {
 	conf       *ServerConfig
 	logger     *slog.Logger
 	httpClient *http.Client
+	filter     *filtering.DNSFilter
 
 	nextID uint64
 }
 
-func newSourceManager(conf *ServerConfig, l *slog.Logger) *sourceManager {
+func newSourceManager(conf *ServerConfig, l *slog.Logger, f *filtering.DNSFilter) *sourceManager {
 	httpClient := http.DefaultClient
 	if conf != nil && conf.HTTPClient != nil {
 		httpClient = conf.HTTPClient
@@ -166,6 +122,7 @@ func newSourceManager(conf *ServerConfig, l *slog.Logger) *sourceManager {
 		conf:       conf,
 		logger:     l,
 		httpClient: httpClient,
+		filter:     f,
 	}
 
 	var maxID uint64
@@ -194,37 +151,6 @@ func (m *sourceManager) cacheDir() string {
 	return filepath.Join(m.conf.DataDir, upstreamSourcesCacheDir)
 }
 
-func validateSourceURL(urlStr string, safeFSPatterns []string) (err error) {
-	if filepath.IsAbs(urlStr) {
-		urlStr = filepath.Clean(urlStr)
-		fi, err := os.Stat(urlStr)
-		if err != nil {
-			return err
-		}
-
-		if fi.IsDir() {
-			return fmt.Errorf("path %q is a directory, not a file", urlStr)
-		}
-
-		if !filtering.PathMatchesAny(safeFSPatterns, urlStr) {
-			return fmt.Errorf("path %q does not match safe patterns", urlStr)
-		}
-
-		return nil
-	}
-
-	u, err := url.ParseRequestURI(urlStr)
-	if err != nil {
-		return err
-	}
-
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return fmt.Errorf("unsupported scheme %q", u.Scheme)
-	}
-
-	return nil
-}
-
 func (m *sourceManager) validateLines(lines []string) (err error) {
 	if len(lines) == 0 {
 		return nil
@@ -244,7 +170,7 @@ func (m *sourceManager) prepare(ctx context.Context, src UpstreamDNSSourceYAML) 
 		return p, fmt.Errorf("creating cache dir: %w", err)
 	}
 
-	r, err := sourceReader(ctx, m.httpClient, src.URL, m.conf.SafeFSPatterns)
+	r, err := m.filter.Reader(src.URL)
 	if err != nil {
 		return p, err
 	}
@@ -441,11 +367,6 @@ func (m *sourceManager) applyPreparedLocked(staged []UpstreamDNSSourceYAML, prep
 }
 
 func (m *sourceManager) stageAdd(ctx context.Context, src UpstreamDNSSourceYAML) (res sourceStageResult, err error) {
-	err = validateSourceURL(src.URL, m.conf.SafeFSPatterns)
-	if err != nil {
-		return res, fmt.Errorf("checking source: %w", err)
-	}
-
 	if slices.ContainsFunc(m.conf.UpstreamDNSSources, func(cur UpstreamDNSSourceYAML) bool { return cur.URL == src.URL }) {
 		return res, errors.New("url already exists")
 	}
@@ -508,11 +429,6 @@ func (m *sourceManager) stageSet(ctx context.Context, oldURL string, data Upstre
 	idx := slices.IndexFunc(staged, func(src UpstreamDNSSourceYAML) bool { return src.URL == oldURL })
 	if idx < 0 {
 		return res, errors.New("url doesn't exist")
-	}
-
-	err = validateSourceURL(data.URL, m.conf.SafeFSPatterns)
-	if err != nil {
-		return res, fmt.Errorf("checking source: %w", err)
 	}
 
 	if oldURL != data.URL && slices.ContainsFunc(staged, func(src UpstreamDNSSourceYAML) bool { return src.URL == data.URL }) {

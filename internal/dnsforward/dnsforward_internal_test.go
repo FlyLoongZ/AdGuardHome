@@ -558,7 +558,7 @@ func TestNewSourceManager_LoadsMetadataFromCache(t *testing.T) {
 		},
 	}
 
-	_ = newSourceManager(conf, testLogger)
+	_ = newSourceManager(conf, testLogger, nil)
 	require.Equal(t, 2, conf.UpstreamDNSSources[0].RulesCount)
 	assert.False(t, conf.UpstreamDNSSources[0].LastUpdated.IsZero())
 	assert.NotZero(t, conf.UpstreamDNSSources[0].checksum)

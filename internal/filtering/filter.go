@@ -507,7 +507,7 @@ func (d *DNSFilter) updateIntl(ctx context.Context, flt *FilterYAML) (ok bool, e
 	}
 	defer func() { err = d.finalizeUpdate(ctx, tmpFile, flt, res, err, ok) }()
 
-	r, err := d.reader(flt.URL)
+	r, err := d.Reader(flt.URL)
 	if err != nil {
 		// Don't wrap the error since it's informative enough as is.
 		return false, err
@@ -568,7 +568,7 @@ func (d *DNSFilter) finalizeUpdate(
 
 // reader returns an io.ReadCloser reading filtering-rule list data form either
 // a file on the filesystem or the filter's HTTP URL.
-func (d *DNSFilter) reader(fltURL string) (r io.ReadCloser, err error) {
+func (d *DNSFilter) Reader(fltURL string) (r io.ReadCloser, err error) {
 	if !filepath.IsAbs(fltURL) {
 		r, err = d.readerFromURL(fltURL)
 		if err != nil {

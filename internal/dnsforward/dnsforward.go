@@ -263,7 +263,7 @@ func NewServer(p DNSCreateParams) (s *Server, err error) {
 			ServePlainDNS: true,
 		},
 	}
-	s.upstreamSources = newSourceManager(&s.conf, s.logger)
+	s.upstreamSources = newSourceManager(&s.conf, s.logger, s.dnsFilter)
 
 	s.sysResolvers, err = sysresolv.NewSystemResolvers(nil, defaultPlainDNSPort)
 	if err != nil {
@@ -496,7 +496,7 @@ func (s *Server) Prepare(ctx context.Context, conf *ServerConfig) (err error) {
 	}
 
 	s.conf = *conf
-	s.upstreamSources = newSourceManager(&s.conf, s.logger)
+	s.upstreamSources = newSourceManager(&s.conf, s.logger, s.dnsFilter)
 
 	// dnsFilter can be nil during application update.
 	if s.dnsFilter != nil {
@@ -900,7 +900,7 @@ func (s *Server) Reconfigure(ctx context.Context, conf *ServerConfig) error {
 			}
 		} else {
 			s.conf = prevConf
-			s.upstreamSources = newSourceManager(&s.conf, s.logger)
+			s.upstreamSources = newSourceManager(&s.conf, s.logger, s.dnsFilter)
 		}
 
 		return fmt.Errorf("could not reconfigure the server: %w", err)
@@ -919,7 +919,7 @@ func (s *Server) Reconfigure(ctx context.Context, conf *ServerConfig) error {
 			}
 		} else {
 			s.conf = prevConf
-			s.upstreamSources = newSourceManager(&s.conf, s.logger)
+			s.upstreamSources = newSourceManager(&s.conf, s.logger, s.dnsFilter)
 		}
 
 		return fmt.Errorf("could not reconfigure the server: %w", err)
