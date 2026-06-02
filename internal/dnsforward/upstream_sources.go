@@ -207,6 +207,8 @@ func newSourceManager(conf *ServerConfig, l *slog.Logger) *sourceManager {
 			err := sm.loadMetadata(src)
 			if err != nil {
 				l.Warn("loading upstream source cache metadata", "url", src.URL, slogutil.KeyError, err)
+			} else if src.LastUpdated.IsZero() {
+				l.Debug("no cached metadata for upstream source, will fetch on next refresh", "url", src.URL)
 			}
 		}
 	}
