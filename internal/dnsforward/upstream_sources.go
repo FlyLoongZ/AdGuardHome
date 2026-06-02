@@ -220,16 +220,6 @@ func (m *sourceManager) cacheDir() string {
 	return filepath.Join(m.conf.DataDir, upstreamSourcesCacheDir)
 }
 
-func (m *sourceManager) sourceByURL(url string) (idx int, ok bool) {
-	for i, src := range m.conf.UpstreamDNSSources {
-		if src.URL == url {
-			return i, true
-		}
-	}
-
-	return -1, false
-}
-
 func validateSourceURL(urlStr string, safeFSPatterns []string) (err error) {
 	if filepath.IsAbs(urlStr) {
 		urlStr = filepath.Clean(urlStr)
