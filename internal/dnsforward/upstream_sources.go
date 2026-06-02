@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -104,25 +103,18 @@ type sourceStageResult struct {
 
 // sourceManager manages upstream DNS source lists and their cached contents.
 type sourceManager struct {
-	conf       *ServerConfig
-	logger     *slog.Logger
-	httpClient *http.Client
-	filter     *filtering.DNSFilter
+	conf   *ServerConfig
+	logger *slog.Logger
+	filter *filtering.DNSFilter
 
 	nextID uint64
 }
 
 func newSourceManager(conf *ServerConfig, l *slog.Logger, f *filtering.DNSFilter) *sourceManager {
-	httpClient := http.DefaultClient
-	if conf != nil && conf.HTTPClient != nil {
-		httpClient = conf.HTTPClient
-	}
-
 	sm := &sourceManager{
-		conf:       conf,
-		logger:     l,
-		httpClient: httpClient,
-		filter:     f,
+		conf:   conf,
+		logger: l,
+		filter: f,
 	}
 
 	var maxID uint64
@@ -168,6 +160,10 @@ func (m *sourceManager) prepare(ctx context.Context, src UpstreamDNSSourceYAML) 
 	err = os.MkdirAll(m.cacheDir(), aghos.DefaultPermDir)
 	if err != nil {
 		return p, fmt.Errorf("creating cache dir: %w", err)
+	}
+
+	if m.filter == nil {
+		return p, errors.New("dns filter is not initialized")
 	}
 
 	r, err := m.filter.Reader(src.URL)
