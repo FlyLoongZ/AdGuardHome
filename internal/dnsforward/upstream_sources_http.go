@@ -314,7 +314,7 @@ func (s *Server) handleUpstreamSourcesRefresh(w http.ResponseWriter, r *http.Req
 	s.upstreamSourcesMu.Lock()
 	defer s.upstreamSourcesMu.Unlock()
 
-	stage, err := s.upstreamSources.stageRefresh(ctx, true)
+	stage, err := s.upstreamSources.stageRefresh(ctx)
 	if err != nil {
 		aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusBadRequest, "%s", err)
 

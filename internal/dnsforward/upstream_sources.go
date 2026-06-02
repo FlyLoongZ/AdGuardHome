@@ -660,7 +660,7 @@ func (m *sourceManager) stageSet(ctx context.Context, oldURL string, data Upstre
 	return res, nil
 }
 
-func (m *sourceManager) stageRefresh(ctx context.Context, force bool) (res sourceStageResult, err error) {
+func (m *sourceManager) stageRefresh(ctx context.Context) (res sourceStageResult, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -673,10 +673,6 @@ func (m *sourceManager) stageRefresh(ctx context.Context, force bool) (res sourc
 	for i := range staged {
 		src := &staged[i]
 		if !src.Enabled {
-			continue
-		}
-
-		if !force && !src.LastUpdated.IsZero() {
 			continue
 		}
 
