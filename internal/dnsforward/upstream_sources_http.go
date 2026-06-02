@@ -102,6 +102,10 @@ type upstreamSourceAddJSON struct {
 	URL  string `json:"url"`
 }
 
+type upstreamSourceRemoveJSON struct {
+	URL string `json:"url"`
+}
+
 type upstreamSourceSetDataJSON struct {
 	Name    string `json:"name"`
 	URL     string `json:"url"`
@@ -197,7 +201,7 @@ func (s *Server) handleUpstreamSourcesRemoveURL(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	req := &upstreamSourceAddJSON{}
+	req := &upstreamSourceRemoveJSON{}
 	err := json.NewDecoder(r.Body).Decode(req)
 	if err != nil {
 		aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusBadRequest, "decoding request: %s", err)
