@@ -428,11 +428,11 @@ func (s *Server) reconfigureWithUpstreamSources(
 	return nil
 }
 
+// appendUpstreamSourcesForTest appends enabled upstream DNS sources to the list
+// for testing.  Note that when upstream_dns_file is set, the caller
+// (handleTestUpstreamDNS) replaces upstreams entirely with the file contents,
+// so this function is not called in that path.
 func (s *Server) appendUpstreamSourcesForTest(ctx context.Context, upstreams []string) []string {
-	if s.conf.UpstreamDNSFileName != "" {
-		return upstreams
-	}
-
 	sources := s.upstreamSources.all()
 	for _, src := range sources {
 		if !src.Enabled {
