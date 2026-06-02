@@ -258,7 +258,7 @@ func (m *sourceManager) validateLines(lines []string) (err error) {
 		return nil
 	}
 
-	_, err = proxy.ParseUpstreamsConfig(lines, &upstream.Options{Logger: m.logger})
+	_, err = proxy.ParseUpstreamsConfig(lines, &upstream.Options{Logger: slogutil.NewDiscardLogger()})
 	if err != nil {
 		return fmt.Errorf("validating upstream source rules: %w", err)
 	}
