@@ -55,48 +55,6 @@ func sourcesToJSON(sources []UpstreamDNSSourceYAML) (res []upstreamSourceJSON) {
 	return res
 }
 
-func sourceFromJSON(src upstreamSourceJSON) (res UpstreamDNSSourceYAML) {
-	res = UpstreamDNSSourceYAML{
-		Enabled: src.Enabled,
-		URL:     src.URL,
-		Name:    src.Name,
-		UpstreamDNSSource: UpstreamDNSSource{
-			ID: src.ID,
-		},
-	}
-
-	if src.RulesCount > 0 {
-		res.RulesCount = int(src.RulesCount)
-	}
-
-	if src.LastUpdated != "" {
-		if t, err := time.Parse(time.RFC3339, src.LastUpdated); err == nil {
-			res.LastUpdated = t
-		}
-	}
-
-	return res
-}
-
-func sourcesFromJSON(sources []upstreamSourceJSON) (res []UpstreamDNSSourceYAML) {
-	res = make([]UpstreamDNSSourceYAML, 0, len(sources))
-	for _, src := range sources {
-		res = append(res, sourceFromJSON(src))
-	}
-
-	return res
-}
-
-func ptrSourceSlice(src *[]upstreamSourceJSON) (res *[]UpstreamDNSSourceYAML) {
-	if src == nil {
-		return nil
-	}
-
-	parsed := sourcesFromJSON(*src)
-
-	return &parsed
-}
-
 type upstreamSourceAddJSON struct {
 	Name string `json:"name"`
 	URL  string `json:"url"`
