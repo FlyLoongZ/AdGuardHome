@@ -36,9 +36,6 @@ type jsonDNSConfig struct {
 	// UpstreamsFile is the file containing upstream DNS servers.
 	UpstreamsFile *string `json:"upstream_dns_file"`
 
-	// UpstreamDNSSources are additional upstream DNS source URLs or paths.
-	UpstreamDNSSources *[]upstreamSourceJSON `json:"upstream_dns_sources"`
-
 	// Bootstraps is the list of DNS servers resolving IP addresses of the
 	// upstream DoH/DoT resolvers.
 	Bootstraps *[]string `json:"bootstrap_dns"`
@@ -177,8 +174,6 @@ func (s *Server) getDNSConfig(ctx context.Context) (c *jsonDNSConfig) {
 	resolveClients := s.conf.AddrProcConf.UseRDNS
 	usePrivateRDNS := s.conf.UsePrivateRDNS
 	localPTRUpstreams := stringutil.CloneSliceOrEmpty(s.conf.LocalPTRResolvers)
-	upstreamSources := slices.Clone(s.conf.UpstreamDNSSources)
-
 	var upstreamMode jsonUpstreamMode
 	switch s.conf.UpstreamMode {
 	case UpstreamModeLoadBalance:
@@ -199,7 +194,6 @@ func (s *Server) getDNSConfig(ctx context.Context) (c *jsonDNSConfig) {
 	return &jsonDNSConfig{
 		Upstreams:                &upstreams,
 		UpstreamsFile:            &upstreamFile,
-		UpstreamDNSSources:       ptrSlice(sourcesToJSON(upstreamSources)),
 		Bootstraps:               &bootstraps,
 		Fallbacks:                &fallbacks,
 		ProtectionEnabled:        &protectionEnabled,
@@ -230,8 +224,6 @@ func (s *Server) getDNSConfig(ctx context.Context) (c *jsonDNSConfig) {
 		DisabledUntil:            protectionDisabledUntil,
 	}
 }
-
-func ptrSlice[T any](s []T) *[]T { return &s }
 
 // defaultLocalPTRUpstreams returns the list of default local PTR resolvers
 // filtered of AdGuard Home's own DNS server addresses.  It may appear empty.
@@ -575,19 +567,6 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 	err = req.validate(ctx, s.logger, ourAddrs, s.sysResolvers, s.privateNets, s.conf.CacheSize)
 	if err != nil {
 		aghhttp.ErrorAndLog(ctx, l, r, w, http.StatusBadRequest, "%s", err)
-
-		return
-	}
-
-	if req.UpstreamDNSSources != nil {
-		aghhttp.ErrorAndLog(
-			ctx,
-			l,
-			r,
-			w,
-			http.StatusBadRequest,
-			"upstream_dns_sources must be managed via /control/upstream_dns_sources",
-		)
 
 		return
 	}
