@@ -364,6 +364,12 @@ func (s *Server) reconfigureWithUpstreamSources(
 	realDataDir := staged.DataDir
 	staged.UpstreamDNSSources = slices.Clone(sources)
 
+	// 清理之前进程崩溃后残留的 staging 目录
+	oldDirs, _ := filepath.Glob(filepath.Join(s.conf.DataDir, "upstream-sources-stage-*"))
+	for _, d := range oldDirs {
+		_ = os.RemoveAll(d)
+	}
+
 	cacheDir, err := os.MkdirTemp(s.conf.DataDir, "upstream-sources-stage-")
 	if err != nil {
 		return fmt.Errorf("creating staged cache dir: %w", err)
