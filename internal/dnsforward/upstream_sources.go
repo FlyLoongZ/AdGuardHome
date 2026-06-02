@@ -14,7 +14,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/AdguardTeam/AdGuardHome/internal/aghnet"
@@ -154,7 +153,6 @@ type sourceManager struct {
 	logger     *slog.Logger
 	httpClient *http.Client
 
-	mu     *sync.RWMutex
 	nextID uint64
 }
 
@@ -168,7 +166,6 @@ func newSourceManager(conf *ServerConfig, l *slog.Logger) *sourceManager {
 		conf:       conf,
 		logger:     l,
 		httpClient: httpClient,
-		mu:         &sync.RWMutex{},
 	}
 
 	var maxID uint64
@@ -444,9 +441,6 @@ func (m *sourceManager) applyPreparedLocked(staged []UpstreamDNSSourceYAML, prep
 }
 
 func (m *sourceManager) stageAdd(ctx context.Context, src UpstreamDNSSourceYAML) (res sourceStageResult, err error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	err = validateSourceURL(src.URL, m.conf.SafeFSPatterns)
 	if err != nil {
 		return res, fmt.Errorf("checking source: %w", err)
@@ -491,9 +485,6 @@ func (m *sourceManager) stageAdd(ctx context.Context, src UpstreamDNSSourceYAML)
 }
 
 func (m *sourceManager) stageRemove(srcURL string) (res sourceStageResult, err error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	staged := m.cloneSources()
 	idx := slices.IndexFunc(staged, func(src UpstreamDNSSourceYAML) bool { return src.URL == srcURL })
 	if idx < 0 {
@@ -513,9 +504,6 @@ func (m *sourceManager) stageRemove(srcURL string) (res sourceStageResult, err e
 }
 
 func (m *sourceManager) stageSet(ctx context.Context, oldURL string, data UpstreamDNSSourceYAML) (res sourceStageResult, err error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	staged := m.cloneSources()
 	idx := slices.IndexFunc(staged, func(src UpstreamDNSSourceYAML) bool { return src.URL == oldURL })
 	if idx < 0 {
@@ -596,9 +584,6 @@ func (m *sourceManager) stageSet(ctx context.Context, oldURL string, data Upstre
 }
 
 func (m *sourceManager) stageRefresh(ctx context.Context) (res sourceStageResult, err error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	staged := m.cloneSources()
 	prepared := make([]sourcePrepared, len(staged))
 	warnings := []error{}
@@ -656,9 +641,6 @@ func (m *sourceManager) applyStaged(res sourceStageResult) (err error) {
 		return nil
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	return m.applyPreparedLocked(res.staged, res.prepared)
 }
 
@@ -671,9 +653,6 @@ func boolToInt(v bool) int {
 }
 
 func (m *sourceManager) all() (sources []UpstreamDNSSourceYAML) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
 	sources = make([]UpstreamDNSSourceYAML, 0, len(m.conf.UpstreamDNSSources))
 	for _, src := range m.conf.UpstreamDNSSources {
 		sources = append(sources, src.clone())

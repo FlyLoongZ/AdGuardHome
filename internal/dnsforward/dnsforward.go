@@ -181,7 +181,7 @@ type Server struct {
 
 	// upstreamSourcesMu serializes full upstream source update transactions,
 	// including staging, reconfiguration, and final commit.
-	upstreamSourcesMu sync.Mutex
+	upstreamSourcesMu sync.RWMutex
 
 	// serverLock protects Server.
 	serverLock sync.RWMutex

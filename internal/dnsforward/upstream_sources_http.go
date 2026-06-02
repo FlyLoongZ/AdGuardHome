@@ -94,9 +94,9 @@ func (s *Server) checkUpstreamSourcesMutable() (err error) {
 }
 
 func (s *Server) handleUpstreamSourcesStatus(w http.ResponseWriter, r *http.Request) {
-	s.serverLock.RLock()
+	s.upstreamSourcesMu.RLock()
 	sources := s.upstreamSources.all()
-	s.serverLock.RUnlock()
+	s.upstreamSourcesMu.RUnlock()
 
 	aghhttp.WriteJSONResponseOK(r.Context(), s.logger, w, r, upstreamSourceStatusResp{
 		Sources: sourcesToJSON(sources),
@@ -397,7 +397,9 @@ func (s *Server) reconfigureWithUpstreamSources(
 // (handleTestUpstreamDNS) replaces upstreams entirely with the file contents,
 // so this function is not called in that path.
 func (s *Server) appendUpstreamSourcesForTest(ctx context.Context, upstreams []string) []string {
+	s.upstreamSourcesMu.RLock()
 	sources := s.upstreamSources.all()
+	s.upstreamSourcesMu.RUnlock()
 	for _, src := range sources {
 		if !src.Enabled {
 			continue
