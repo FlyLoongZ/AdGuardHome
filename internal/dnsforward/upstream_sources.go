@@ -1,6 +1,7 @@
 package dnsforward
 
 import (
+	"bufio"
 	"context"
 	stderrors "errors"
 	"fmt"
@@ -291,50 +292,22 @@ func (m *sourceManager) prepare(ctx context.Context, src UpstreamDNSSourceYAML) 
 	}()
 
 	h := xxhash.New()
-	buf := make([]byte, 32*1024)
+	writer := io.MultiWriter(tmpFile, h)
+	tr := io.TeeReader(r, writer)
 
-	lineBuf := strings.Builder{}
+	var lines []string
 	lineCount := 0
-	lines := []string{}
-	for {
-		n, readErr := r.Read(buf)
-		if n > 0 {
-			chunk := buf[:n]
-			_, _ = h.Write(chunk)
-
-			_, err = tmpFile.Write(chunk)
-			if err != nil {
-				return p, fmt.Errorf("writing temp file: %w", err)
-			}
-
-			for _, b := range chunk {
-				if b == '\n' {
-					line := strings.TrimSpace(lineBuf.String())
-					if line != "" && !aghnet.IsCommentOrEmpty(line) {
-						lineCount++
-						lines = append(lines, line)
-					}
-					lineBuf.Reset()
-
-					continue
-				}
-
-				lineBuf.WriteByte(b)
-			}
-		}
-
-		if readErr != nil {
-			if stderrors.Is(readErr, io.EOF) {
-				break
-			}
-
-			return p, fmt.Errorf("reading source: %w", readErr)
+	scanner := bufio.NewScanner(tr)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line != "" && !aghnet.IsCommentOrEmpty(line) {
+			lineCount++
+			lines = append(lines, line)
 		}
 	}
-
-	if line := strings.TrimSpace(lineBuf.String()); line != "" && !aghnet.IsCommentOrEmpty(line) {
-		lineCount++
-		lines = append(lines, line)
+	if err := scanner.Err(); err != nil {
+		return p, fmt.Errorf("reading source: %w", err)
 	}
 
 	err = m.validateLines(lines)
@@ -420,41 +393,19 @@ func (m *sourceManager) loadMetadata(src *UpstreamDNSSourceYAML) (err error) {
 	}
 
 	h := xxhash.New()
-	buf := make([]byte, 32*1024)
-	lineBuf := strings.Builder{}
+	tr := io.TeeReader(file, h)
+
 	lineCount := 0
-	for {
-		n, readErr := file.Read(buf)
-		if n > 0 {
-			chunk := buf[:n]
-			_, _ = h.Write(chunk)
-
-			for _, b := range chunk {
-				if b == '\n' {
-					line := strings.TrimSpace(lineBuf.String())
-					if line != "" && !aghnet.IsCommentOrEmpty(line) {
-						lineCount++
-					}
-					lineBuf.Reset()
-
-					continue
-				}
-
-				lineBuf.WriteByte(b)
-			}
-		}
-
-		if readErr != nil {
-			if stderrors.Is(readErr, io.EOF) {
-				break
-			}
-
-			return fmt.Errorf("reading source file: %w", readErr)
+	scanner := bufio.NewScanner(tr)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line != "" && !aghnet.IsCommentOrEmpty(line) {
+			lineCount++
 		}
 	}
-
-	if line := strings.TrimSpace(lineBuf.String()); line != "" && !aghnet.IsCommentOrEmpty(line) {
-		lineCount++
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("reading source file: %w", err)
 	}
 
 	src.RulesCount = lineCount
