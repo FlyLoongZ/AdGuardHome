@@ -2,7 +2,6 @@ package dnsforward
 
 import (
 	"context"
-	"encoding/binary"
 	stderrors "errors"
 	"fmt"
 	"io"
@@ -42,7 +41,7 @@ type UpstreamDNSSourceYAML struct {
 	Name        string    `yaml:"name"`
 	RulesCount  int       `yaml:"-"`
 	LastUpdated time.Time `yaml:"-"`
-	checksum    uint32
+	checksum    uint64
 
 	UpstreamDNSSource `yaml:",inline"`
 }
@@ -156,8 +155,8 @@ func pathMatchesAny(globs []string, filePath string) (ok bool) {
 type sourcePrepared struct {
 	tmpPath       string
 	count         int
-	checksum      uint32
-	prevChecksum  uint32
+	checksum      uint64
+	prevChecksum  uint64
 	name          string
 	lastUpdated   time.Time
 }
@@ -348,8 +347,7 @@ func (m *sourceManager) prepare(ctx context.Context, src UpstreamDNSSourceYAML) 
 		title = filepath.Base(src.URL)
 	}
 
-	v := h.Sum64()
-	checksum := binary.LittleEndian.Uint32([]byte{byte(v), byte(v >> 8), byte(v >> 16), byte(v >> 24)})
+	checksum := h.Sum64()
 
 	p = sourcePrepared{
 		tmpPath:       tmpFile.Name(),
@@ -459,9 +457,8 @@ func (m *sourceManager) loadMetadata(src *UpstreamDNSSourceYAML) (err error) {
 		lineCount++
 	}
 
-	v := h.Sum64()
 	src.RulesCount = lineCount
-	src.checksum = binary.LittleEndian.Uint32([]byte{byte(v), byte(v >> 8), byte(v >> 16), byte(v >> 24)})
+	src.checksum = h.Sum64()
 	src.LastUpdated = st.ModTime()
 
 	if filepath.IsAbs(src.URL) {
