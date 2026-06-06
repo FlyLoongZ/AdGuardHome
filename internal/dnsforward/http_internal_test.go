@@ -146,7 +146,6 @@ func TestDNSForwardHTTP_handleGetConfig(t *testing.T) {
 
 			var got map[string]any
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
-			delete(got, "upstream_dns_sources")
 
 			cType := w.Header().Get(httphdr.ContentType)
 			assert.Equal(t, aghhttp.HdrValApplicationJSON, cType)
@@ -157,15 +156,14 @@ func TestDNSForwardHTTP_handleGetConfig(t *testing.T) {
 		})
 	}
 
-	t.Run("includes_upstream_sources_field", func(t *testing.T) {
+	t.Run("excludes_upstream_sources_field", func(t *testing.T) {
 		s.conf = defaultConf
 		w.Body.Reset()
 		s.handleGetConfig(w, httptest.NewRequest(http.MethodGet, "/", nil))
 
 		var got map[string]any
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
-		_, ok := got["upstream_dns_sources"]
-		require.True(t, ok)
+		assert.NotContains(t, got, "upstream_dns_sources")
 	})
 }
 
@@ -716,7 +714,7 @@ func TestServer_HandleTestUpstreamDNS_WithSources(t *testing.T) {
 		BlockingMode:     filtering.BlockingModeDefault,
 	}, ServerConfig{
 		Config: Config{
-			UpstreamDNS: []string{"114.114.114.114:53"},
+			UpstreamDNS:  []string{"114.114.114.114:53"},
 			UpstreamMode: UpstreamModeLoadBalance,
 			UpstreamDNSSources: []UpstreamDNSSourceYAML{{
 				Enabled: true,
@@ -783,13 +781,13 @@ func TestServer_HandleUpstreamDNSSources_RejectsUnsafeAndInvalidContent(t *testi
 			EDNSClientSubnet: &EDNSClientSubnet{},
 			ClientsContainer: EmptyClientsContainer{},
 		},
-		TLSConf:         &TLSConfig{},
-		ConfModifier:    agh.EmptyConfigModifier{},
-		ServePlainDNS:   true,
-		UDPListenAddrs:  []*net.UDPAddr{},
-		TCPListenAddrs:  []*net.TCPAddr{},
-		DataDir:         filterDataDir,
-		SafeFSPatterns:  []string{filepath.Join(safeDir, "*")},
+		TLSConf:        &TLSConfig{},
+		ConfModifier:   agh.EmptyConfigModifier{},
+		ServePlainDNS:  true,
+		UDPListenAddrs: []*net.UDPAddr{},
+		TCPListenAddrs: []*net.TCPAddr{},
+		DataDir:        filterDataDir,
+		SafeFSPatterns: []string{filepath.Join(safeDir, "*")},
 	})
 
 	reqBody := func(v any) io.ReadCloser {
@@ -835,17 +833,17 @@ func TestServer_HandleUpstreamDNSSources_RefreshPartialSuccess(t *testing.T) {
 		BlockingMode:     filtering.BlockingModeDefault,
 	}, ServerConfig{
 		Config: Config{
-			UpstreamDNS: []string{"114.114.114.114:53"},
+			UpstreamDNS:  []string{"114.114.114.114:53"},
 			UpstreamMode: UpstreamModeLoadBalance,
 			UpstreamDNSSources: []UpstreamDNSSourceYAML{{
-				Enabled: true,
-				URL:     goodSrcPath,
-				Name:    "good",
+				Enabled:           true,
+				URL:               goodSrcPath,
+				Name:              "good",
 				UpstreamDNSSource: UpstreamDNSSource{ID: 1},
 			}, {
-				Enabled: true,
-				URL:     badSrcPath,
-				Name:    "bad",
+				Enabled:           true,
+				URL:               badSrcPath,
+				Name:              "bad",
 				UpstreamDNSSource: UpstreamDNSSource{ID: 2},
 			}},
 			EDNSClientSubnet: &EDNSClientSubnet{},
