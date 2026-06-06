@@ -92,14 +92,11 @@ type sourcePrepared struct {
 }
 
 type sourceStageResult struct {
-	staged           []UpstreamDNSSourceYAML
-	prepared         []sourcePrepared
-	requiresRestart  bool
-	hadContentChange bool
-	updated          int
-	warnings         []error
-	added            UpstreamDNSSourceYAML
-	removed          UpstreamDNSSourceYAML
+	staged          []UpstreamDNSSourceYAML
+	prepared        []sourcePrepared
+	requiresRestart bool
+	updated         int
+	warnings        []error
 }
 
 // sourceManager manages upstream DNS source lists and their cached contents.
@@ -418,12 +415,10 @@ func (m *sourceManager) stageAdd(ctx context.Context, src UpstreamDNSSourceYAML)
 	prepared[len(staged)-1] = p
 
 	res = sourceStageResult{
-		staged:           staged,
-		prepared:         prepared,
-		requiresRestart:  src.Enabled,
-		hadContentChange: src.Enabled,
-		updated:          boolToInt(src.Enabled),
-		added:            src.clone(),
+		staged:          staged,
+		prepared:        prepared,
+		requiresRestart: src.Enabled,
+		updated:         boolToInt(src.Enabled),
 	}
 
 	return res, nil
@@ -436,13 +431,12 @@ func (m *sourceManager) stageRemove(srcURL string) (res sourceStageResult, err e
 		return res, errors.New("url doesn't exist")
 	}
 
-	removed := staged[idx].clone()
+	removedEnabled := staged[idx].Enabled
 	staged = slices.Delete(staged, idx, idx+1)
 
 	res = sourceStageResult{
 		staged:          staged,
-		requiresRestart: removed.Enabled,
-		removed:         removed,
+		requiresRestart: removedEnabled,
 	}
 
 	return res, nil
@@ -509,11 +503,10 @@ func (m *sourceManager) stageSet(ctx context.Context, oldURL string, data Upstre
 	staged[idx] = src
 
 	res = sourceStageResult{
-		staged:           staged,
-		prepared:         prepared,
-		requiresRestart:  (semanticChanged && (prevEnabled || src.Enabled)) || hadContentChange,
-		hadContentChange: hadContentChange,
-		updated:          boolToInt(hadContentChange),
+		staged:          staged,
+		prepared:        prepared,
+		requiresRestart: (semanticChanged && (prevEnabled || src.Enabled)) || hadContentChange,
+		updated:         boolToInt(hadContentChange),
 	}
 
 	if !metadataChanged && !semanticChanged {
@@ -565,12 +558,11 @@ func (m *sourceManager) stageRefresh(ctx context.Context) (res sourceStageResult
 	}
 
 	res = sourceStageResult{
-		staged:           staged,
-		prepared:         prepared,
-		requiresRestart:  updated > 0,
-		hadContentChange: updated > 0,
-		updated:          updated,
-		warnings:         warnings,
+		staged:          staged,
+		prepared:        prepared,
+		requiresRestart: updated > 0,
+		updated:         updated,
+		warnings:        warnings,
 	}
 
 	return res, nil
