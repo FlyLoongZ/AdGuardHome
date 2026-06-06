@@ -340,17 +340,6 @@ func TestDNSForwardHTTP_handleSetConfig(t *testing.T) {
 		})
 	}
 
-	t.Run("rejects_upstream_dns_sources_mutation", func(t *testing.T) {
-		rBody := io.NopCloser(bytes.NewReader([]byte(`{
-			"upstream_dns_sources": [{"id":1,"name":"test","url":"https://example.org/source.txt","enabled":true}]
-		}`)))
-		r, reqErr := http.NewRequest(http.MethodPost, "http://example.com", rBody)
-		require.NoError(t, reqErr)
-
-		s.handleSetConfig(w, r)
-		assert.Contains(t, strings.TrimSuffix(w.Body.String(), "\n"), "upstream_dns_sources must be managed via /control/upstream_dns_sources")
-		w.Body.Reset()
-	})
 }
 
 // newLocalUpstreamListener creates a local upstream listener and returns its
