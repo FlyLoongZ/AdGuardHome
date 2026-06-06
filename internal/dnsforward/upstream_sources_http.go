@@ -379,7 +379,7 @@ func (s *Server) reconfigureWithUpstreamSources(
 		}
 	}
 
-	err = s.Reconfigure(ctx, &staged)
+	err = s.reconfigureLocked(ctx, &staged)
 	if err != nil {
 		return err
 	}

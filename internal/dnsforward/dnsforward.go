@@ -861,6 +861,15 @@ func (s *Server) proxy() (p *proxy.Proxy) {
 //
 // TODO(a.garipov): This whole piece of API is weird and needs to be remade.
 func (s *Server) Reconfigure(ctx context.Context, conf *ServerConfig) error {
+	s.upstreamSourcesMu.Lock()
+	defer s.upstreamSourcesMu.Unlock()
+
+	return s.reconfigureLocked(ctx, conf)
+}
+
+// reconfigureLocked applies the new configuration to the DNS server.  The
+// s.upstreamSourcesMu lock is expected to be held by the caller.
+func (s *Server) reconfigureLocked(ctx context.Context, conf *ServerConfig) error {
 	s.serverLock.Lock()
 	defer s.serverLock.Unlock()
 
