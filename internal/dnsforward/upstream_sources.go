@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -82,12 +83,12 @@ func (s *UpstreamDNSSourceYAML) clone() (clone UpstreamDNSSourceYAML) {
 }
 
 type sourcePrepared struct {
-	tmpPath       string
-	count         int
-	checksum      uint64
-	prevChecksum  uint64
-	name          string
-	lastUpdated   time.Time
+	tmpPath      string
+	count        int
+	checksum     uint64
+	prevChecksum uint64
+	name         string
+	lastUpdated  time.Time
 }
 
 type sourceStageResult struct {
@@ -105,16 +106,14 @@ type sourceStageResult struct {
 type sourceManager struct {
 	conf   *ServerConfig
 	logger *slog.Logger
-	filter *filtering.DNSFilter
 
 	nextID uint64
 }
 
-func newSourceManager(conf *ServerConfig, l *slog.Logger, f *filtering.DNSFilter) *sourceManager {
+func newSourceManager(conf *ServerConfig, l *slog.Logger, _ *filtering.DNSFilter) *sourceManager {
 	sm := &sourceManager{
 		conf:   conf,
 		logger: l,
-		filter: f,
 	}
 
 	var maxID uint64
@@ -156,17 +155,46 @@ func (m *sourceManager) validateLines(lines []string) (err error) {
 	return nil
 }
 
+// reader returns source contents from either an HTTP URL or a local file path.
+func (m *sourceManager) reader(srcURL string) (r io.ReadCloser, err error) {
+	if !filepath.IsAbs(srcURL) {
+		client := m.conf.HTTPClient
+		if client == nil {
+			client = http.DefaultClient
+		}
+
+		resp, err := client.Get(srcURL)
+		if err != nil {
+			return nil, fmt.Errorf("reading from url: %w", err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("got status code %d, want %d", resp.StatusCode, http.StatusOK)
+		}
+
+		return resp.Body, nil
+	}
+
+	srcURL = filepath.Clean(srcURL)
+	if !filtering.PathMatchesAny(m.conf.SafeFSPatterns, srcURL) {
+		return nil, fmt.Errorf("path %q does not match safe patterns", srcURL)
+	}
+
+	r, err = os.Open(srcURL)
+	if err != nil {
+		return nil, fmt.Errorf("opening file: %w", err)
+	}
+
+	return r, nil
+}
+
 func (m *sourceManager) prepare(ctx context.Context, src UpstreamDNSSourceYAML) (p sourcePrepared, err error) {
 	err = os.MkdirAll(m.cacheDir(), aghos.DefaultPermDir)
 	if err != nil {
 		return p, fmt.Errorf("creating cache dir: %w", err)
 	}
 
-	if m.filter == nil {
-		return p, errors.New("dns filter is not initialized")
-	}
-
-	r, err := m.filter.Reader(src.URL)
+	r, err := m.reader(src.URL)
 	if err != nil {
 		return p, err
 	}
@@ -219,11 +247,11 @@ func (m *sourceManager) prepare(ctx context.Context, src UpstreamDNSSourceYAML) 
 	checksum := h.Sum64()
 
 	p = sourcePrepared{
-		tmpPath:       tmpFile.Name(),
-		count:         lineCount,
-		checksum:      checksum,
-		name:          title,
-		lastUpdated:   time.Now(),
+		tmpPath:     tmpFile.Name(),
+		count:       lineCount,
+		checksum:    checksum,
+		name:        title,
+		lastUpdated: time.Now(),
 	}
 
 	return p, nil
