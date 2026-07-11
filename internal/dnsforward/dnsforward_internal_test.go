@@ -170,6 +170,12 @@ func createTestServer(
 		forwardConf.SafeFSPatterns = []string{filepath.Join(tb.TempDir(), "*")}
 	}
 
+	// Upstream source downloads reuse filtering.DNSFilter.Reader, so keep the
+	// filter and DNS server SafeFSPatterns in sync for tests.
+	if filterConf.SafeFSPatterns == nil {
+		filterConf.SafeFSPatterns = append([]string(nil), forwardConf.SafeFSPatterns...)
+	}
+
 	f, err := filtering.New(filterConf, filters)
 	require.NoError(tb, err)
 
