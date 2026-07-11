@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -24,8 +25,9 @@ import (
 	"github.com/cespare/xxhash/v2"
 )
 
+// upstreamSourcesCacheDir is the subdirectory under the filtering data
+// directory used for both filter lists and upstream source caches.
 const upstreamSourcesCacheDir = "filters"
-const upstreamSourcesCachePrefix = "upstream-"
 
 // maxUpstreamSourceSize is the maximum size of an upstream source list.  It
 // matches the default filtering-rule list limit so large downloads cannot
@@ -52,12 +54,13 @@ type UpstreamDNSSourceYAML struct {
 	UpstreamDNSSource `yaml:",inline"`
 }
 
-// path returns the cache file path for source contents.
+// path returns the cache file path for source contents.  Cache files share the
+// same naming scheme as filtering-rule lists: filters/{id}.txt.
 func (s *UpstreamDNSSourceYAML) path(dataDir string) string {
 	return filepath.Join(
 		dataDir,
 		upstreamSourcesCacheDir,
-		upstreamSourcesCachePrefix+strconv.FormatUint(s.ID, 10)+".txt",
+		strconv.FormatUint(s.ID, 10)+".txt",
 	)
 }
 
@@ -109,11 +112,13 @@ type sourceStageResult struct {
 type sourceManager struct {
 	conf   *ServerConfig
 	logger *slog.Logger
-	// filter is used to download upstream sources through the same path as
-	// filtering-rule lists.
+	// filter provides the shared data directory, HTTP client, SafeFS patterns,
+	// and list ID generator used by filtering-rule lists.
 	filter *filtering.DNSFilter
 
-	nextID uint64
+	dataDir        string
+	httpClient     *http.Client
+	safeFSPatterns []string
 }
 
 func newSourceManager(conf *ServerConfig, l *slog.Logger, f *filtering.DNSFilter) *sourceManager {
@@ -123,12 +128,20 @@ func newSourceManager(conf *ServerConfig, l *slog.Logger, f *filtering.DNSFilter
 		filter: f,
 	}
 
-	var maxID uint64
+	if f != nil {
+		sm.dataDir = f.DataDir()
+		sm.httpClient = f.HTTPClient()
+		sm.safeFSPatterns = f.SafeFSPatterns()
+	}
+	if sm.httpClient == nil {
+		sm.httpClient = http.DefaultClient
+	}
+
 	if conf != nil {
 		for i := range conf.UpstreamDNSSources {
 			src := &conf.UpstreamDNSSources[i]
-			if src.ID > maxID {
-				maxID = src.ID
+			if f != nil && src.ID != 0 {
+				f.ReserveListID(src.ID)
 			}
 
 			err := sm.loadMetadata(src)
@@ -140,14 +153,44 @@ func newSourceManager(conf *ServerConfig, l *slog.Logger, f *filtering.DNSFilter
 		}
 	}
 
-	sm.nextID = maxID + 1
 	sm.cleanupStaleCacheFiles()
 
 	return sm
 }
 
 func (m *sourceManager) cacheDir() string {
-	return filepath.Join(m.conf.DataDir, upstreamSourcesCacheDir)
+	return filepath.Join(m.dataDir, upstreamSourcesCacheDir)
+}
+
+// openSource returns a reader for a remote URL or a local absolute file path.
+// Local paths are restricted by the filtering SafeFS patterns.
+func (m *sourceManager) openSource(srcURL string) (r io.ReadCloser, err error) {
+	if filepath.IsAbs(srcURL) {
+		path := filepath.Clean(srcURL)
+		if !filtering.PathMatchesAny(m.safeFSPatterns, path) {
+			return nil, fmt.Errorf("path %q does not match safe patterns", path)
+		}
+
+		r, err = os.Open(path)
+		if err != nil {
+			return nil, fmt.Errorf("opening file: %w", err)
+		}
+
+		return r, nil
+	}
+
+	resp, err := m.httpClient.Get(srcURL)
+	if err != nil {
+		return nil, fmt.Errorf("reading from url: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		_ = resp.Body.Close()
+
+		return nil, fmt.Errorf("got status code %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	return resp.Body, nil
 }
 
 func (m *sourceManager) validateLines(lines []string) (err error) {
@@ -169,12 +212,11 @@ func (m *sourceManager) prepare(ctx context.Context, src UpstreamDNSSourceYAML) 
 		return p, fmt.Errorf("creating cache dir: %w", err)
 	}
 
-	if m.filter == nil {
-		return p, errors.New("dns filter is not initialized")
+	if m.dataDir == "" {
+		return p, errors.New("filtering data directory is not configured")
 	}
 
-	// Reuse the filtering-rule download path for local files and remote URLs.
-	r, err := m.filter.Reader(src.URL)
+	r, err := m.openSource(src.URL)
 	if err != nil {
 		return p, err
 	}
@@ -243,7 +285,7 @@ func (m *sourceManager) prepare(ctx context.Context, src UpstreamDNSSourceYAML) 
 }
 
 func (m *sourceManager) commit(src *UpstreamDNSSourceYAML, p sourcePrepared) (updated bool, err error) {
-	dst := src.path(m.conf.DataDir)
+	dst := src.path(m.dataDir)
 
 	if p.checksum == p.prevChecksum {
 		_, statErr := os.Stat(dst)
@@ -285,7 +327,7 @@ func (m *sourceManager) cleanupPrepared(prepared []sourcePrepared) {
 }
 
 func (m *sourceManager) loadMetadata(src *UpstreamDNSSourceYAML) (err error) {
-	fileName := src.path(m.conf.DataDir)
+	fileName := src.path(m.dataDir)
 
 	file, err := os.Open(fileName)
 	if stderrors.Is(err, os.ErrNotExist) {
@@ -368,7 +410,7 @@ func (m *sourceManager) finalizeRemoved(staged []UpstreamDNSSourceYAML) {
 	}
 
 	for id := range removed {
-		path := (&UpstreamDNSSourceYAML{UpstreamDNSSource: UpstreamDNSSource{ID: id}}).path(m.conf.DataDir)
+		path := (&UpstreamDNSSourceYAML{UpstreamDNSSource: UpstreamDNSSource{ID: id}}).path(m.dataDir)
 		if rmErr := os.Remove(path); rmErr != nil && !stderrors.Is(rmErr, os.ErrNotExist) {
 			m.logger.ErrorContext(context.Background(), "removing source cache", "path", path, slogutil.KeyError, rmErr)
 		}
@@ -382,14 +424,18 @@ func (m *sourceManager) finalizeRemoved(staged []UpstreamDNSSourceYAML) {
 }
 
 // cleanupStaleCacheFiles removes leftover temporary and backup cache files.
+// Only temporary/backup artifacts are removed; permanent {id}.txt files are
+// left alone because they may belong to filtering-rule lists.
 func (m *sourceManager) cleanupStaleCacheFiles() {
-	if m.conf == nil || m.conf.DataDir == "" {
+	if m.dataDir == "" {
 		return
 	}
 
 	patterns := []string{
-		filepath.Join(m.cacheDir(), upstreamSourcesCachePrefix+"*.txt.old"),
+		filepath.Join(m.cacheDir(), "*.txt.old"),
 		filepath.Join(m.cacheDir(), "src-*.tmp"),
+		filepath.Join(m.cacheDir(), "upstream-*.txt"),
+		filepath.Join(m.cacheDir(), "upstream-*.txt.old"),
 	}
 	for _, pattern := range patterns {
 		matches, err := filepath.Glob(pattern)
@@ -416,8 +462,18 @@ func (m *sourceManager) stageAddPrepared(src UpstreamDNSSourceYAML, p sourcePrep
 	staged := m.cloneSources()
 	prepared := make([]sourcePrepared, len(staged)+1)
 
-	src.ID = m.nextID
-	m.nextID++
+	if m.filter == nil {
+		_ = os.Remove(p.tmpPath)
+
+		return res, errors.New("dns filter is not initialized")
+	}
+
+	src.ID = m.filter.NextListID()
+	if src.ID == 0 {
+		_ = os.Remove(p.tmpPath)
+
+		return res, errors.New("failed to allocate source id")
+	}
 	p.prevChecksum = 0
 
 	src.ensureName(p.name)
@@ -684,7 +740,7 @@ func (m *sourceManager) ensureCaches(ctx context.Context) {
 			continue
 		}
 
-		cachePath := src.path(m.conf.DataDir)
+		cachePath := src.path(m.dataDir)
 		_, err := os.Stat(cachePath)
 		if err == nil {
 			continue

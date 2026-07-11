@@ -553,7 +553,11 @@ func (s *Server) Prepare(ctx context.Context, conf *ServerConfig) (err error) {
 func (s *Server) prepareUpstreamSettings(ctx context.Context, boot upstream.Resolver) (err error) {
 	// Load upstreams either from the file, or from the settings
 	var upstreams []string
-	upstreams, err = s.conf.loadUpstreams(ctx, s.logger)
+	dataDir := ""
+	if s.upstreamSources != nil {
+		dataDir = s.upstreamSources.dataDir
+	}
+	upstreams, err = s.conf.loadUpstreams(ctx, s.logger, dataDir)
 	if err != nil {
 		return fmt.Errorf("loading upstreams: %w", err)
 	}

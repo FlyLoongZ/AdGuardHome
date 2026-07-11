@@ -43,6 +43,25 @@ func (g *idGenerator) next() (id rules.ListID) {
 	return rules.ListID(id64)
 }
 
+// reserve ensures that subsequent next calls return values greater than id.
+func (g *idGenerator) reserve(id rules.ListID) {
+	uid := uint64(id)
+	if uid == 0 {
+		return
+	}
+
+	for {
+		cur := g.current.Load()
+		if uid <= cur {
+			return
+		}
+
+		if g.current.CompareAndSwap(cur, uid) {
+			return
+		}
+	}
+}
+
 // fix ensures that flts all have unique IDs.
 func (g *idGenerator) fix(flts []FilterYAML) {
 	set := container.NewMapSet[rules.ListID]()

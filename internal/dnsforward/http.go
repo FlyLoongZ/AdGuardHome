@@ -390,7 +390,8 @@ func (req *jsonDNSConfig) checkPrivateRDNS(
 		privateNets,
 		&upstream.Options{
 			Logger: slogutil.NewDiscardLogger(),
-		})
+		},
+	)
 	err = errors.WithDeferred(err, uc.Close())
 	if err != nil {
 		return fmt.Errorf("private upstream servers: %w", err)
@@ -729,7 +730,11 @@ func (s *Server) handleTestUpstreamDNS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.conf.UpstreamDNSFileName != "" {
-		req.Upstreams, err = s.conf.loadUpstreams(ctx, s.logger)
+		dataDir := ""
+		if s.upstreamSources != nil {
+			dataDir = s.upstreamSources.dataDir
+		}
+		req.Upstreams, err = s.conf.loadUpstreams(ctx, s.logger, dataDir)
 		if err != nil {
 			aghhttp.ErrorAndLog(
 				ctx,

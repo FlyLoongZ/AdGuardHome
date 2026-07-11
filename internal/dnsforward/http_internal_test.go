@@ -411,21 +411,25 @@ func TestServer_HandleTestUpstreamDNS(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	srv := createTestServer(t, &filtering.Config{
-		BlockingMode: filtering.BlockingModeDefault,
-		EtcHosts:     hc,
-	}, ServerConfig{
-		UDPListenAddrs:  []*net.UDPAddr{{}},
-		TCPListenAddrs:  []*net.TCPAddr{{}},
-		UpstreamTimeout: upsTimeout,
-		TLSConf:         &TLSConfig{},
-		Config: Config{
-			UpstreamMode:     UpstreamModeLoadBalance,
-			EDNSClientSubnet: &EDNSClientSubnet{Enabled: false},
-			ClientsContainer: EmptyClientsContainer{},
+	srv := createTestServer(
+		t,
+		&filtering.Config{
+			BlockingMode: filtering.BlockingModeDefault,
+			EtcHosts:     hc,
 		},
-		ServePlainDNS: true,
-	})
+		ServerConfig{
+			UDPListenAddrs:  []*net.UDPAddr{{}},
+			TCPListenAddrs:  []*net.TCPAddr{{}},
+			UpstreamTimeout: upsTimeout,
+			TLSConf:         &TLSConfig{},
+			Config: Config{
+				UpstreamMode:     UpstreamModeLoadBalance,
+				EDNSClientSubnet: &EDNSClientSubnet{Enabled: false},
+				ClientsContainer: EmptyClientsContainer{},
+			},
+			ServePlainDNS: true,
+		},
+	)
 	srv.etcHosts = upstream.NewHostsResolver(hc)
 	startDeferStop(t, srv)
 
@@ -533,6 +537,7 @@ func TestServer_UpstreamSourcesHTTP(t *testing.T) {
 	srv := createTestServer(t, &filtering.Config{
 		FilteringEnabled: true,
 		BlockingMode:     filtering.BlockingModeDefault,
+		DataDir:          filepath.Join(tmpDir, "data"),
 		SafeFSPatterns:   []string{filepath.Join(tmpDir, "*")},
 	}, ServerConfig{
 		Config: Config{
@@ -546,7 +551,6 @@ func TestServer_UpstreamSourcesHTTP(t *testing.T) {
 		ServePlainDNS:  true,
 		UDPListenAddrs: []*net.UDPAddr{},
 		TCPListenAddrs: []*net.TCPAddr{},
-		DataDir:        filepath.Join(tmpDir, "data"),
 	})
 
 	reqBody := func(v any) io.ReadCloser {
@@ -696,11 +700,12 @@ func TestServer_HandleTestUpstreamDNS_WithSources(t *testing.T) {
 	t.Chdir(tmpDir)
 	cacheDir := filepath.Join(tmpDir, "data", upstreamSourcesCacheDir)
 	require.NoError(t, os.MkdirAll(cacheDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(cacheDir, "upstream-1.txt"), []byte("[/example.org/]127.0.0.1\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(cacheDir, "1.txt"), []byte("[/example.org/]127.0.0.1\n"), 0o644))
 
 	srv := createTestServer(t, &filtering.Config{
 		FilteringEnabled: true,
 		BlockingMode:     filtering.BlockingModeDefault,
+		DataDir:          filepath.Join(tmpDir, "data"),
 	}, ServerConfig{
 		Config: Config{
 			UpstreamDNS:  []string{"114.114.114.114:53"},
@@ -776,7 +781,6 @@ func TestServer_HandleUpstreamDNSSources_RejectsUnsafeAndInvalidContent(t *testi
 		ServePlainDNS:  true,
 		UDPListenAddrs: []*net.UDPAddr{},
 		TCPListenAddrs: []*net.TCPAddr{},
-		DataDir:        filterDataDir,
 	})
 
 	reqBody := func(v any) io.ReadCloser {
@@ -820,6 +824,7 @@ func TestServer_HandleUpstreamDNSSources_RefreshPartialSuccess(t *testing.T) {
 	srv := createTestServer(t, &filtering.Config{
 		FilteringEnabled: true,
 		BlockingMode:     filtering.BlockingModeDefault,
+		DataDir:          filepath.Join(tmpDir, "data"),
 		SafeFSPatterns:   []string{filepath.Join(tmpDir, "*")},
 	}, ServerConfig{
 		Config: Config{
@@ -844,7 +849,6 @@ func TestServer_HandleUpstreamDNSSources_RefreshPartialSuccess(t *testing.T) {
 		ServePlainDNS:  true,
 		UDPListenAddrs: []*net.UDPAddr{},
 		TCPListenAddrs: []*net.TCPAddr{},
-		DataDir:        filepath.Join(tmpDir, "data"),
 	})
 
 	sourcesBefore := srv.upstreamSources.all()
@@ -876,6 +880,6 @@ func TestServer_HandleUpstreamDNSSources_RefreshPartialSuccess(t *testing.T) {
 	assert.False(t, sources[0].LastUpdated.IsZero())
 	assert.Equal(t, badBefore, sources[1].LastUpdated)
 	assert.NotEqual(t, goodBefore, sources[0].LastUpdated)
-	_, statErr := os.Stat(sources[0].path(srv.conf.DataDir))
+	_, statErr := os.Stat(sources[0].path(srv.upstreamSources.dataDir))
 	assert.NoError(t, statErr)
 }

@@ -14,7 +14,7 @@ import (
 	"github.com/AdguardTeam/golibs/logutil/slogutil"
 	"github.com/AdguardTeam/golibs/timeutil"
 	"github.com/AdguardTeam/golibs/validate"
-	"github.com/google/gopacket/layers"
+	"github.com/gopacket/gopacket/layers"
 )
 
 // Port numbers for DHCPv4.
@@ -157,6 +157,8 @@ type dhcpInterfaceV4 struct {
 	clock timeutil.Clock
 
 	// addrChecker checks addresses for availability.
+	//
+	// TODO(e.burkov):  Move to [netInterface].
 	addrChecker addressChecker
 
 	// gateway is the IP address of the network gateway.

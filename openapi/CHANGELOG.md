@@ -2,13 +2,13 @@
 
 <!-- TODO(a.garipov): Reformat in accordance with the KeepAChangelog spec. -->
 
-## v0.107.76: API changes
+## v0.107.78: API changes
 
-### Documentation fix for the `reason` query parameter in 'GET /control/querylog'
+### New `interval` values in `GET /control/filtering/status` and `POST /control/filtering/config` APIs
 
-- The `reason` query parameter documentation has been updated to reflect that this parameter is an array.
+The property `interval` of the objects returned from and accepted by the aforementioned APIs can now be any integer between 0 and 8760 (365 days).
 
-## v0.107.75: API changes
+## v0.107.77: API changes
 
 ### New `reason` query parameter in 'GET /control/querylog'
 

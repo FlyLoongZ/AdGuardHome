@@ -11,6 +11,11 @@ import (
 //
 // TODO(a.garipov): Move to golibs?
 func PathMatchesAny(globs []string, filePath string) (ok bool) {
+	return pathMatchesAny(globs, filePath)
+}
+
+// pathMatchesAny is the internal implementation of [PathMatchesAny].
+func pathMatchesAny(globs []string, filePath string) (ok bool) {
 	if len(globs) == 0 {
 		return false
 	}

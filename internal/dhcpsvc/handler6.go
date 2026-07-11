@@ -7,9 +7,34 @@ import (
 
 	"github.com/AdguardTeam/golibs/errors"
 	"github.com/AdguardTeam/golibs/logutil/slogutil"
-	"github.com/google/gopacket"
-	"github.com/google/gopacket/layers"
+	"github.com/gopacket/gopacket"
+	"github.com/gopacket/gopacket/layers"
 )
+
+// serveEther6 handles the incoming ethernet packets and dispatches them to the
+// appropriate handler.  It's used to run in a separate goroutine as it blocks
+// until packets channel is closed.  iface and nd must not be nil.  nd must have
+// at least a single address returned by its Addresses method.
+func (srv *DHCPServer) serveEther6(ctx context.Context, iface *dhcpInterfaceV6, nd NetworkDevice) {
+	defer slogutil.RecoverAndLog(ctx, srv.logger)
+
+	src := gopacket.NewPacketSource(nd, nd.LinkType())
+	srvDUID := newServerDUID(nd.HardwareAddr())
+
+	for pkt := range src.Packets() {
+		fd, err := newFrameData6(pkt, nd, srvDUID)
+		if err != nil {
+			srv.logger.DebugContext(ctx, "parsing frame data", slogutil.KeyError, err)
+
+			continue
+		}
+
+		err = srv.serveV6(ctx, iface, pkt, fd)
+		if err != nil {
+			srv.logger.ErrorContext(ctx, "serving", slogutil.KeyError, err)
+		}
+	}
+}
 
 // serveV6 handles the ethernet packet of IPv6 type. iface and pkt must not be
 // nil.  iface and fd must be valid.  pkt must be an IPv6 packet.
@@ -87,12 +112,11 @@ func (iface *dhcpInterfaceV6) handleSolicit(
 	lease, iaid := iface.allocateForSolicit(ctx, fd.ether.SrcMAC, req)
 
 	resp := &layers.DHCPv6{
-		MsgType:       layers.DHCPv6MsgTypeAdverstise,
+		MsgType:       layers.DHCPv6MsgTypeAdvertise,
 		TransactionID: req.TransactionID,
 	}
 
 	if lease == nil {
-		l.DebugContext(ctx, "no ia_na in solicit or no addresses available")
 		resp.Options = iface.newSolicitRespOpts(fd, req, cliID, iaid, nil, false)
 
 		return respond6(fd, resp)
@@ -110,6 +134,12 @@ func (iface *dhcpInterfaceV6) handleSolicit(
 	if err != nil {
 		l.WarnContext(ctx, "committing rapid leases", slogutil.KeyError, err)
 		isRapidCommit = false
+	} else {
+		// The server will also send a Reply in response to a Solicit with a
+		// Rapid Commit option.
+		//
+		// See RFC 9915 Section 18.3.
+		resp.MsgType = layers.DHCPv6MsgTypeReply
 	}
 
 	resp.Options = iface.newSolicitRespOpts(fd, req, cliID, iaid, lease, isRapidCommit)
@@ -119,8 +149,6 @@ func (iface *dhcpInterfaceV6) handleSolicit(
 
 // handleRequest handles messages of type REQUEST.  req must not be nil and must
 // be a valid DHCPv6 message of type REQUEST.  fd must be valid.
-//
-// TODO(e.burkov):  Implement.  This is a stub for now.
 func (iface *dhcpInterfaceV6) handleRequest(
 	ctx context.Context,
 	fd *frameData6,
@@ -134,7 +162,45 @@ func (iface *dhcpInterfaceV6) handleRequest(
 	l := iface.common.logger
 	l.DebugContext(ctx, "handling message", "type", req.MsgType, "cli_id", cliID)
 
-	return nil
+	iface.common.indexMu.Lock()
+	defer iface.common.indexMu.Unlock()
+
+	resp := &layers.DHCPv6{
+		MsgType:       layers.DHCPv6MsgTypeReply,
+		TransactionID: req.TransactionID,
+	}
+
+	iana, ok := iface.firstIANA(ctx, req)
+	if !ok {
+		// In practice, the DHCPv6 REQUEST with no IA_NA options is not useful,
+		// since the standard explicitly defines the INFORMATION-REQUEST message
+		// type for that purpose.  However, there are no requirements which
+		// invalidate such messages, so the server must respond.
+		resp.Options = iface.newRequestRespOpts(fd, req, cliID, layers.DHCPv6Option{})
+
+		return respond6(fd, resp)
+	}
+
+	reqIP, hasReqIP := iana.requestedAddr()
+	if hasReqIP && !iface.subnetPrefix.Contains(reqIP) {
+		respIANA := newIANAWithStatus(iana.ID, layers.DHCPv6StatusCodeNotOnLink)
+		resp.Options = iface.newRequestRespOpts(fd, req, cliID, respIANA)
+
+		return respond6(fd, resp)
+	}
+
+	var ianaOpt layers.DHCPv6Option
+
+	lease, err := iface.leaseForRequest(ctx, req, fd.ether.SrcMAC)
+	if err != nil {
+		ianaOpt = newIANAWithStatus(iana.ID, layers.DHCPv6StatusCodeNoAddrsAvail)
+	} else {
+		ianaOpt = iface.iaNAFromLease(lease, iana.ID)
+	}
+
+	resp.Options = iface.newRequestRespOpts(fd, req, cliID, ianaOpt)
+
+	return respond6(fd, resp)
 }
 
 // handleConfirm handles messages of type CONFIRM.  req must not be nil and must

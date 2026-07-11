@@ -19,6 +19,7 @@ import (
 	"github.com/AdguardTeam/AdGuardHome/internal/aghslog"
 	"github.com/AdguardTeam/AdGuardHome/internal/aghtls"
 	"github.com/AdguardTeam/AdGuardHome/internal/client"
+	"github.com/AdguardTeam/dnscrypt"
 	"github.com/AdguardTeam/dnsproxy/proxy"
 	"github.com/AdguardTeam/dnsproxy/ratelimit"
 	"github.com/AdguardTeam/dnsproxy/upstream"
@@ -29,7 +30,6 @@ import (
 	"github.com/AdguardTeam/golibs/stringutil"
 	"github.com/AdguardTeam/golibs/timeutil"
 	"github.com/AdguardTeam/golibs/validate"
-	"github.com/ameshkov/dnscrypt/v2"
 )
 
 // Config represents the DNS filtering configuration of AdGuard Home.  The zero
@@ -225,7 +225,7 @@ type TLSConfig struct {
 type DNSCryptConfig struct {
 	// ResolverCert is the certificate used for DNSCrypt connections.  It is not
 	// nil if there is at least one UDP or TCP address present.
-	ResolverCert *dnscrypt.Cert
+	ResolverCert *dnscrypt.Certificate
 
 	// UDPListenAddrs are the addresses to listen on for DNSCrypt UDP
 	// connections.
@@ -315,9 +315,6 @@ type ServerConfig struct {
 	// PendingRequestsEnabled defines if duplicate requests should be forwarded
 	// to upstreams along with the original one.
 	PendingRequestsEnabled bool
-
-	// DataDir is used to store upstream source cache contents.
-	DataDir string
 }
 
 // UpstreamMode is a enumeration of upstream mode representations.  See
@@ -402,7 +399,8 @@ func (s *Server) newProxyConfig(ctx context.Context) (conf *proxy.Config, err er
 		return nil, fmt.Errorf("validating plain: %w", err)
 	}
 
-	conf, err = prepareCacheConfig(conf,
+	conf, err = prepareCacheConfig(
+		conf,
 		srvConf.CacheEnabled,
 		srvConf.CacheSize,
 		srvConf.CacheMinTTL,
@@ -533,10 +531,12 @@ func (s *Server) prepareIpsetListSettings(ctx context.Context) (ipsets []string,
 }
 
 // loadUpstreams parses upstream DNS servers from the configured file or from
-// the configuration itself.  l must not be nil.
+// the configuration itself.  dataDir is used to locate upstream source caches.
+// l must not be nil.
 func (conf *ServerConfig) loadUpstreams(
 	ctx context.Context,
 	l *slog.Logger,
+	dataDir string,
 ) (upstreams []string, err error) {
 	if conf.UpstreamDNSFileName == "" {
 		upstreams = stringutil.FilterOut(conf.UpstreamDNS, aghnet.IsCommentOrEmpty)
@@ -546,7 +546,7 @@ func (conf *ServerConfig) loadUpstreams(
 				continue
 			}
 
-			data, readErr := os.ReadFile(src.path(conf.DataDir))
+			data, readErr := os.ReadFile(src.path(dataDir))
 			if readErr != nil {
 				if errors.Is(readErr, os.ErrNotExist) {
 					l.WarnContext(ctx, "upstream source cache does not exist", "id", src.ID, "url", src.URL)

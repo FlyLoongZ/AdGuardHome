@@ -32,6 +32,7 @@ import (
 	"github.com/AdguardTeam/urlfilter"
 	"github.com/AdguardTeam/urlfilter/filterlist"
 	"github.com/AdguardTeam/urlfilter/rules"
+	"github.com/c2h5oh/datasize"
 	"github.com/miekg/dns"
 )
 
@@ -157,6 +158,10 @@ type Config struct {
 	// SafeFSPatterns are the patterns for matching which local filtering-rule
 	// files can be added.
 	SafeFSPatterns []string `yaml:"safe_fs_patterns"`
+
+	// MaxHTTPSize defines the maximum size of the HTTP body.  The value must
+	// not be equal to zero.
+	MaxHTTPSize datasize.ByteSize `yaml:"max_http_size"`
 
 	SafeBrowsingCacheSize uint `yaml:"safebrowsing_cache_size"` // (in bytes)
 	SafeSearchCacheSize   uint `yaml:"safesearch_cache_size"`   // (in bytes)
@@ -1054,6 +1059,54 @@ func New(c *Config, blockFilters []Filter) (d *DNSFilter, err error) {
 	d.idGen.fix(d.conf.WhitelistFilters)
 
 	return d, nil
+}
+
+// DataDir returns the directory used to store filter-list contents.
+func (d *DNSFilter) DataDir() (dir string) {
+	if d == nil || d.conf == nil {
+		return ""
+	}
+
+	return d.conf.DataDir
+}
+
+// HTTPClient returns the HTTP client used for remote list downloads.  It may be
+// nil if the filter is not fully configured.
+func (d *DNSFilter) HTTPClient() (c *http.Client) {
+	if d == nil || d.conf == nil {
+		return nil
+	}
+
+	return d.conf.HTTPClient
+}
+
+// SafeFSPatterns returns the local filesystem allow-list patterns.
+func (d *DNSFilter) SafeFSPatterns() (patterns []string) {
+	if d == nil {
+		return nil
+	}
+
+	return slices.Clone(d.safeFSPatterns)
+}
+
+// NextListID returns the next unique list ID.  It is safe for concurrent use.
+func (d *DNSFilter) NextListID() (id uint64) {
+	if d == nil || d.idGen == nil {
+		return 0
+	}
+
+	return uint64(d.idGen.next())
+}
+
+// ReserveListID ensures that future [DNSFilter.NextListID] values are greater
+// than id.  It is used to keep filter-list and upstream-source IDs unique when
+// both store files under the same filters directory.
+func (d *DNSFilter) ReserveListID(id uint64) {
+	if d == nil || d.idGen == nil || id == 0 {
+		return
+	}
+
+	d.idGen.reserve(rules.ListID(id))
 }
 
 // validateSafeFSPatterns validates and stores patterns for local filtering‑rule

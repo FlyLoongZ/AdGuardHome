@@ -21,12 +21,12 @@ import (
 	"github.com/AdguardTeam/AdGuardHome/internal/filtering"
 	"github.com/AdguardTeam/AdGuardHome/internal/querylog"
 	"github.com/AdguardTeam/AdGuardHome/internal/stats"
+	"github.com/AdguardTeam/dnscrypt"
 	"github.com/AdguardTeam/golibs/errors"
 	"github.com/AdguardTeam/golibs/log"
 	"github.com/AdguardTeam/golibs/logutil/slogutil"
 	"github.com/AdguardTeam/golibs/netutil"
 	"github.com/AdguardTeam/golibs/netutil/urlutil"
-	"github.com/ameshkov/dnscrypt/v2"
 	yaml "go.yaml.in/yaml/v4"
 )
 
@@ -179,7 +179,6 @@ func initDNSServer(
 		httpReg,
 		globalContext.clients.storage,
 		confModifier,
-		workDir,
 	)
 	if err != nil {
 		return fmt.Errorf("newServerConfig: %w", err)
@@ -273,7 +272,6 @@ func newServerConfig(
 	httpReg aghhttp.Registrar,
 	clientsContainer dnsforward.ClientsContainer,
 	confModifier agh.ConfigModifier,
-	workDir string,
 ) (newConf *dnsforward.ServerConfig, err error) {
 	hosts := aghalg.CoalesceSlice(dnsConf.BindHosts, []netip.Addr{netutil.IPv4Localhost()})
 
@@ -303,7 +301,6 @@ func newServerConfig(
 		UseHTTP3Upstreams:      dnsConf.UseHTTP3Upstreams,
 		ServePlainDNS:          dnsConf.ServePlainDNS,
 		PendingRequestsEnabled: dnsConf.PendingRequests.Enabled,
-		DataDir:                filepath.Join(workDir, dataDir),
 	}
 
 	var initialAddresses []netip.Addr
@@ -410,7 +407,7 @@ func newDNSCryptConfig(
 		return nil, fmt.Errorf("decoding dnscrypt config: %w", err)
 	}
 
-	cert, err := rc.CreateCert()
+	cert, err := rc.NewCert()
 	if err != nil {
 		return nil, fmt.Errorf("creating dnscrypt cert: %w", err)
 	}

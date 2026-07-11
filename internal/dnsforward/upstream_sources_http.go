@@ -439,7 +439,7 @@ func (s *Server) appendUpstreamSourcesForTest(ctx context.Context, upstreams []s
 			continue
 		}
 
-		data, readErr := os.ReadFile(src.path(s.conf.DataDir))
+		data, readErr := os.ReadFile(src.path(s.upstreamSources.dataDir))
 		if readErr != nil {
 			s.logger.WarnContext(ctx, "reading upstream source cache for test", "url", src.URL, slogutil.KeyError, readErr)
 
