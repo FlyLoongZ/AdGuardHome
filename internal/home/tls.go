@@ -300,7 +300,6 @@ func (m *tlsManager) reconfigureDNSServer(ctx context.Context) (err error) {
 		globalContext.clients.storage,
 		m.confModifier,
 		m.web.conf.workDir,
-		config.Filtering.SafeFSPatterns,
 	)
 	if err != nil {
 		return fmt.Errorf("generating forwarding dns server config: %w", err)

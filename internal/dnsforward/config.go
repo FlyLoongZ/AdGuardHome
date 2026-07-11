@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
-	"net/http"
 	"os"
 	"slices"
 	"strings"
@@ -289,11 +288,6 @@ type ServerConfig struct {
 	// Register an HTTP handler
 	HTTPReg aghhttp.Registrar
 
-	// HTTPClient is retained for compatibility with reconfigure paths that may
-	// copy ServerConfig without reconstructing network clients.  Upstream
-	// source downloads use [filtering.DNSFilter.Reader] and its HTTP client.
-	HTTPClient *http.Client
-
 	// LocalPTRResolvers is a slice of addresses to be used as upstreams for
 	// resolving PTR queries for local addresses.
 	LocalPTRResolvers []string
@@ -324,11 +318,6 @@ type ServerConfig struct {
 
 	// DataDir is used to store upstream source cache contents.
 	DataDir string
-
-	// SafeFSPatterns is retained for compatibility with callers that still pass
-	// local filesystem allow-lists into ServerConfig.  Upstream source path
-	// checks are enforced by [filtering.DNSFilter.Reader].
-	SafeFSPatterns []string
 }
 
 // UpstreamMode is a enumeration of upstream mode representations.  See

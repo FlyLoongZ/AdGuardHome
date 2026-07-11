@@ -533,6 +533,7 @@ func TestServer_UpstreamSourcesHTTP(t *testing.T) {
 	srv := createTestServer(t, &filtering.Config{
 		FilteringEnabled: true,
 		BlockingMode:     filtering.BlockingModeDefault,
+		SafeFSPatterns:   []string{filepath.Join(tmpDir, "*")},
 	}, ServerConfig{
 		Config: Config{
 			UpstreamDNS:      []string{"114.114.114.114:53"},
@@ -546,7 +547,6 @@ func TestServer_UpstreamSourcesHTTP(t *testing.T) {
 		UDPListenAddrs: []*net.UDPAddr{},
 		TCPListenAddrs: []*net.TCPAddr{},
 		DataDir:        filepath.Join(tmpDir, "data"),
-		SafeFSPatterns: []string{filepath.Join(tmpDir, "*")},
 	})
 
 	reqBody := func(v any) io.ReadCloser {
@@ -763,6 +763,7 @@ func TestServer_HandleUpstreamDNSSources_RejectsUnsafeAndInvalidContent(t *testi
 		FilteringEnabled: true,
 		BlockingMode:     filtering.BlockingModeDefault,
 		DataDir:          filterDataDir,
+		SafeFSPatterns:   []string{filepath.Join(safeDir, "*")},
 	}, ServerConfig{
 		Config: Config{
 			UpstreamDNS:      []string{"114.114.114.114:53"},
@@ -776,7 +777,6 @@ func TestServer_HandleUpstreamDNSSources_RejectsUnsafeAndInvalidContent(t *testi
 		UDPListenAddrs: []*net.UDPAddr{},
 		TCPListenAddrs: []*net.TCPAddr{},
 		DataDir:        filterDataDir,
-		SafeFSPatterns: []string{filepath.Join(safeDir, "*")},
 	})
 
 	reqBody := func(v any) io.ReadCloser {
@@ -820,6 +820,7 @@ func TestServer_HandleUpstreamDNSSources_RefreshPartialSuccess(t *testing.T) {
 	srv := createTestServer(t, &filtering.Config{
 		FilteringEnabled: true,
 		BlockingMode:     filtering.BlockingModeDefault,
+		SafeFSPatterns:   []string{filepath.Join(tmpDir, "*")},
 	}, ServerConfig{
 		Config: Config{
 			UpstreamDNS:  []string{"114.114.114.114:53"},
@@ -844,7 +845,6 @@ func TestServer_HandleUpstreamDNSSources_RefreshPartialSuccess(t *testing.T) {
 		UDPListenAddrs: []*net.UDPAddr{},
 		TCPListenAddrs: []*net.TCPAddr{},
 		DataDir:        filepath.Join(tmpDir, "data"),
-		SafeFSPatterns: []string{filepath.Join(tmpDir, "*")},
 	})
 
 	sourcesBefore := srv.upstreamSources.all()

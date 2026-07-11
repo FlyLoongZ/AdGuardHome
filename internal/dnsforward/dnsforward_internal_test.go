@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"math/big"
 	"net"
+	"net/http"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -166,14 +167,13 @@ func createTestServer(
 		forwardConf.DataDir = filterConf.DataDir
 	}
 
-	if forwardConf.SafeFSPatterns == nil {
-		forwardConf.SafeFSPatterns = []string{filepath.Join(tb.TempDir(), "*")}
-	}
-
-	// Upstream source downloads reuse filtering.DNSFilter.Reader, so keep the
-	// filter and DNS server SafeFSPatterns in sync for tests.
+	// Upstream source downloads reuse filtering.DNSFilter.Reader, so tests that
+	// use local source paths must configure SafeFSPatterns on the filter.
 	if filterConf.SafeFSPatterns == nil {
-		filterConf.SafeFSPatterns = append([]string(nil), forwardConf.SafeFSPatterns...)
+		filterConf.SafeFSPatterns = []string{filepath.Join(tb.TempDir(), "*")}
+	}
+	if filterConf.HTTPClient == nil {
+		filterConf.HTTPClient = http.DefaultClient
 	}
 
 	f, err := filtering.New(filterConf, filters)
@@ -553,8 +553,7 @@ func TestNewSourceManager_LoadsMetadataFromCache(t *testing.T) {
 	require.NoError(t, os.WriteFile(cachePath, []byte("[/example.org/]1.1.1.1\n#comment\n[/example.net/]9.9.9.9\n"), 0o644))
 
 	conf := &ServerConfig{
-		DataDir:        dataDir,
-		SafeFSPatterns: []string{filepath.Join(t.TempDir(), "*")},
+		DataDir: dataDir,
 		Config: Config{
 			UpstreamDNSSources: []UpstreamDNSSourceYAML{{
 				Enabled: true,

@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"slices"
 	"time"
 
 	"github.com/AdguardTeam/AdGuardHome/internal/agh"
@@ -181,7 +180,6 @@ func initDNSServer(
 		globalContext.clients.storage,
 		confModifier,
 		workDir,
-		config.Filtering.SafeFSPatterns,
 	)
 	if err != nil {
 		return fmt.Errorf("newServerConfig: %w", err)
@@ -276,7 +274,6 @@ func newServerConfig(
 	clientsContainer dnsforward.ClientsContainer,
 	confModifier agh.ConfigModifier,
 	workDir string,
-	safeFSPatterns []string,
 ) (newConf *dnsforward.ServerConfig, err error) {
 	hosts := aghalg.CoalesceSlice(dnsConf.BindHosts, []netip.Addr{netutil.IPv4Localhost()})
 
@@ -298,7 +295,6 @@ func newServerConfig(
 		TLSv12Roots:            tlsMgr.rootCerts,
 		ConfModifier:           confModifier,
 		HTTPReg:                httpReg,
-		HTTPClient:             httpClient(tlsMgr),
 		LocalPTRResolvers:      dnsConf.PrivateRDNSResolvers,
 		UseDNS64:               dnsConf.UseDNS64,
 		DNS64Prefixes:          dnsConf.DNS64Prefixes,
@@ -308,7 +304,6 @@ func newServerConfig(
 		ServePlainDNS:          dnsConf.ServePlainDNS,
 		PendingRequestsEnabled: dnsConf.PendingRequests.Enabled,
 		DataDir:                filepath.Join(workDir, dataDir),
-		SafeFSPatterns:         slices.Clone(safeFSPatterns),
 	}
 
 	var initialAddresses []netip.Addr
