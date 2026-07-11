@@ -322,20 +322,6 @@ func (m *sourceManager) cloneSources() (sources []UpstreamDNSSourceYAML) {
 	return sources
 }
 
-func (m *sourceManager) applyPreparedLocked(staged []UpstreamDNSSourceYAML, prepared []sourcePrepared) (err error) {
-	err = m.commitPrepared(staged, prepared)
-	if err != nil {
-		return err
-	}
-
-	m.finalizeRemoved(staged)
-	m.conf.UpstreamDNSSources = staged
-
-	return nil
-}
-
-// commitPrepared writes prepared temporary caches into the final cache paths.
-// On failure, remaining temporary files are cleaned up.
 func (m *sourceManager) commitPrepared(staged []UpstreamDNSSourceYAML, prepared []sourcePrepared) (err error) {
 	for i := range prepared {
 		if prepared[i].tmpPath == "" {
@@ -556,14 +542,6 @@ func (m *sourceManager) stageRefresh(ctx context.Context) (res sourceStageResult
 	}
 
 	return res, nil
-}
-
-func (m *sourceManager) applyStaged(res sourceStageResult) (err error) {
-	if res.staged == nil {
-		return nil
-	}
-
-	return m.applyPreparedLocked(res.staged, res.prepared)
 }
 
 func boolToInt(v bool) int {
