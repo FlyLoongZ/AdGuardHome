@@ -219,13 +219,20 @@ func (s *Server) handleUpstreamSourcesSetURL(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	enabled := true
+	s.upstreamSourcesMu.Lock()
+	defer s.upstreamSourcesMu.Unlock()
+
+	current, found := s.upstreamSources.byURL(req.URL)
+	if !found {
+		aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusBadRequest, "%s", errors.Error("url doesn't exist"))
+
+		return
+	}
+
+	enabled := current.Enabled
 	if req.Data.Enabled != nil {
 		enabled = *req.Data.Enabled
 	}
-
-	s.upstreamSourcesMu.Lock()
-	defer s.upstreamSourcesMu.Unlock()
 
 	stage, err := s.upstreamSources.stageSet(ctx, req.URL, UpstreamDNSSourceYAML{
 		Name:    req.Data.Name,

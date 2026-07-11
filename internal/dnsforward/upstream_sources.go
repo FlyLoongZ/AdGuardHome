@@ -568,6 +568,18 @@ func (m *sourceManager) all() (sources []UpstreamDNSSourceYAML) {
 	return sources
 }
 
+// byURL returns the source with the given URL and whether it was found.
+func (m *sourceManager) byURL(srcURL string) (src UpstreamDNSSourceYAML, ok bool) {
+	idx := slices.IndexFunc(m.conf.UpstreamDNSSources, func(cur UpstreamDNSSourceYAML) bool {
+		return cur.URL == srcURL
+	})
+	if idx < 0 {
+		return UpstreamDNSSourceYAML{}, false
+	}
+
+	return m.conf.UpstreamDNSSources[idx].clone(), true
+}
+
 // ensureCaches downloads and commits enabled upstream sources whose cache
 // files are missing.  Failures are logged and skipped so that DNS startup is
 // not blocked by a single unreachable source.
