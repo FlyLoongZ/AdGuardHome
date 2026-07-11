@@ -667,6 +667,8 @@ func (m *sourceManager) planSet(oldURL string, data UpstreamDNSSourceYAML) (plan
 
 // stageSetPrepared applies a previously computed set plan.  prepared may be
 // empty when no download was required.  Must be called under upstreamSourcesMu.
+// The plan must have been recomputed against the live source list immediately
+// before this call so concurrent updates cannot apply a stale snapshot.
 func (m *sourceManager) stageSetPrepared(plan setPlan, prepared sourcePrepared) (res sourceStageResult, err error) {
 	staged := m.cloneSources()
 	idx := slices.IndexFunc(staged, func(src UpstreamDNSSourceYAML) bool { return src.URL == plan.oldURL })
@@ -676,6 +678,14 @@ func (m *sourceManager) stageSetPrepared(plan setPlan, prepared sourcePrepared) 
 		}
 
 		return res, errors.New("url doesn't exist")
+	}
+
+	if staged[idx].ID != plan.current.ID {
+		if prepared.tmpPath != "" {
+			_ = os.Remove(prepared.tmpPath)
+		}
+
+		return res, errors.Error("upstream source changed, please retry")
 	}
 
 	if plan.oldURL != plan.data.URL && slices.ContainsFunc(staged, func(src UpstreamDNSSourceYAML) bool {

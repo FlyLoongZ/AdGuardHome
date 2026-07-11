@@ -783,6 +783,49 @@ func TestSourceManager_CommitPrepared_PartialFailureRollsBack(t *testing.T) {
 	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
+func TestSourceManager_StageSetPrepared_RejectsStaleID(t *testing.T) {
+	tmpDir := t.TempDir()
+	srcPath := filepath.Join(tmpDir, "upstreams.txt")
+	require.NoError(t, os.WriteFile(srcPath, []byte("[/example.org/]1.1.1.1\n"), 0o644))
+
+	dataDir := filepath.Join(tmpDir, "data")
+	flt, err := filtering.New(&filtering.Config{
+		Logger:          testLogger,
+		DataDir:         dataDir,
+		SafeFSPatterns:  []string{filepath.Join(tmpDir, "*")},
+		BlockedServices: emptyFilteringBlockedServices(),
+	}, nil)
+	require.NoError(t, err)
+
+	src := UpstreamDNSSourceYAML{
+		Enabled: true,
+		URL:     srcPath,
+		Name:    "local",
+		UpstreamDNSSource: UpstreamDNSSource{
+			ID: 1,
+		},
+	}
+	sm := newSourceManager(&ServerConfig{
+		Config: Config{
+			UpstreamDNSSources: []UpstreamDNSSourceYAML{src},
+		},
+	}, testLogger, flt)
+
+	plan, err := sm.planSet(srcPath, UpstreamDNSSourceYAML{
+		Name:    "renamed",
+		URL:     srcPath,
+		Enabled: true,
+	})
+	require.NoError(t, err)
+
+	// Simulate a concurrent replace of the same URL with a different ID.
+	plan.current.ID = 999
+
+	_, err = sm.stageSetPrepared(plan, sourcePrepared{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "changed")
+}
+
 func TestSourceManager_CleanupStaleCacheFiles(t *testing.T) {
 	dataDir := t.TempDir()
 	cacheDir := filepath.Join(dataDir, upstreamSourcesCacheDir)

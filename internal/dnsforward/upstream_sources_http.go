@@ -231,6 +231,11 @@ func (s *Server) handleUpstreamSourcesRemoveURL(w http.ResponseWriter, r *http.R
 	aghhttp.OK(ctx, s.logger, w)
 }
 
+// errUpstreamSourceChanged is returned when a set operation's prepared result
+// no longer matches the live source list, typically because another concurrent
+// update raced with this request.
+const errUpstreamSourceChanged = errors.Error("upstream source changed, please retry")
+
 func (s *Server) handleUpstreamSourcesSetURL(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if err := s.checkUpstreamSourcesMutable(); err != nil {
@@ -272,6 +277,8 @@ func (s *Server) handleUpstreamSourcesSetURL(w http.ResponseWriter, r *http.Requ
 		Enabled: enabled,
 	}
 
+	// Optimistic plan outside the write lock so downloads do not block other
+	// source operations.  The final plan is recomputed under the write lock.
 	s.upstreamSourcesMu.RLock()
 	plan, err := s.upstreamSources.planSet(req.URL, data)
 	s.upstreamSourcesMu.RUnlock()
@@ -282,6 +289,7 @@ func (s *Server) handleUpstreamSourcesSetURL(w http.ResponseWriter, r *http.Requ
 	}
 
 	var prepared sourcePrepared
+	var preparedURL string
 	if plan.needsPrepare {
 		toFetch := plan.current.clone()
 		toFetch.URL = data.URL
@@ -293,10 +301,47 @@ func (s *Server) handleUpstreamSourcesSetURL(w http.ResponseWriter, r *http.Requ
 
 			return
 		}
+		preparedURL = data.URL
 	}
 
 	s.upstreamSourcesMu.Lock()
 	defer s.upstreamSourcesMu.Unlock()
+
+	// Recompute against the live list so concurrent updates cannot apply a
+	// stale plan after the lock-free prepare window.
+	plan, err = s.upstreamSources.planSet(req.URL, data)
+	if err != nil {
+		if prepared.tmpPath != "" {
+			_ = os.Remove(prepared.tmpPath)
+		}
+		aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusBadRequest, "%s", err)
+
+		return
+	}
+
+	if plan.current.ID != current.ID {
+		if prepared.tmpPath != "" {
+			_ = os.Remove(prepared.tmpPath)
+		}
+		aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusConflict, "%s", errUpstreamSourceChanged)
+
+		return
+	}
+
+	if plan.needsPrepare {
+		if prepared.tmpPath == "" || preparedURL != plan.data.URL {
+			if prepared.tmpPath != "" {
+				_ = os.Remove(prepared.tmpPath)
+			}
+			aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusConflict, "%s", errUpstreamSourceChanged)
+
+			return
+		}
+	} else if prepared.tmpPath != "" {
+		// Final plan no longer requires a download; discard the prepared file.
+		_ = os.Remove(prepared.tmpPath)
+		prepared = sourcePrepared{}
+	}
 
 	stage, err := s.upstreamSources.stageSetPrepared(plan, prepared)
 	if err != nil {
