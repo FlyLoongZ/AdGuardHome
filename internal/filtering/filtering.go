@@ -115,6 +115,10 @@ type Config struct {
 	// HTTPClient is the client to use for updating the remote filters.
 	HTTPClient *http.Client `yaml:"-"`
 
+	// AfterUpdate is an optional callback invoked after a periodic filter
+	// update attempt.  It may be nil.
+	AfterUpdate func(ctx context.Context) `yaml:"-"`
+
 	// filtersMu protects filter lists.
 	filtersMu *sync.RWMutex
 
@@ -1116,6 +1120,10 @@ func (d *DNSFilter) periodicallyRefreshFilters(ivl time.Duration) (nextIvl time.
 
 	isNetErr, ok := false, false
 	_, isNetErr, ok = d.tryRefreshFilters(true, true, false)
+
+	if d.conf.AfterUpdate != nil {
+		d.conf.AfterUpdate(context.TODO())
+	}
 
 	if ok && !isNetErr {
 		ivl = maxInterval

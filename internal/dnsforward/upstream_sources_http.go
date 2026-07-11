@@ -316,6 +316,49 @@ func (s *Server) reconfigureWithUpstreamSources(
 	return s.reconfigureLocked(ctx, &staged)
 }
 
+// RefreshUpstreamSources refreshes enabled upstream DNS sources.  It is safe
+// for concurrent use and is intended to be triggered by the filtering update
+// loop so that source lists follow the same interval as filter lists.
+func (s *Server) RefreshUpstreamSources(ctx context.Context) {
+	if s == nil {
+		return
+	}
+
+	if !s.upstreamSourcesMu.TryLock() {
+		s.logger.DebugContext(ctx, "skipping upstream sources refresh: update already in progress")
+
+		return
+	}
+	defer s.upstreamSourcesMu.Unlock()
+
+	if err := s.checkUpstreamSourcesMutable(); err != nil {
+		return
+	}
+
+	stage, err := s.upstreamSources.stageRefresh(ctx)
+	if err != nil {
+		s.logger.WarnContext(ctx, "refreshing upstream sources", slogutil.KeyError, err)
+
+		return
+	}
+
+	for _, warn := range stage.warnings {
+		s.logger.WarnContext(ctx, "refreshing upstream source", slogutil.KeyError, warn)
+	}
+
+	err = applyUpstreamSourceStage(s, ctx, stage)
+	if err != nil {
+		s.upstreamSources.cleanupPrepared(stage.prepared)
+		s.logger.WarnContext(ctx, "applying upstream sources refresh", slogutil.KeyError, err)
+
+		return
+	}
+
+	if stage.updated > 0 {
+		s.logger.InfoContext(ctx, "upstream sources refreshed", "updated", stage.updated)
+	}
+}
+
 // appendUpstreamSourcesForTest appends enabled upstream DNS sources to the list
 // for testing.  Note that when upstream_dns_file is set, the caller
 // (handleTestUpstreamDNS) replaces upstreams entirely with the file contents,
