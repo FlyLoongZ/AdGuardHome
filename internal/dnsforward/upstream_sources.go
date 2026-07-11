@@ -403,26 +403,22 @@ func (m *sourceManager) cleanupStaleCacheFiles() {
 	}
 }
 
-func (m *sourceManager) stageAdd(ctx context.Context, src UpstreamDNSSourceYAML) (res sourceStageResult, err error) {
+// stageAddPrepared merges a successfully prepared source into the current list.
+// The caller may prepare outside the lock; this method only performs local
+// validation and staging and must be called under upstreamSourcesMu.
+func (m *sourceManager) stageAddPrepared(src UpstreamDNSSourceYAML, p sourcePrepared) (res sourceStageResult, err error) {
 	if slices.ContainsFunc(m.conf.UpstreamDNSSources, func(cur UpstreamDNSSourceYAML) bool { return cur.URL == src.URL }) {
+		_ = os.Remove(p.tmpPath)
+
 		return res, errors.New("url already exists")
 	}
 
 	staged := m.cloneSources()
 	prepared := make([]sourcePrepared, len(staged)+1)
 
-	// Assign an ID only after prepare succeeds so failed adds do not create
-	// permanent ID gaps.
 	src.ID = m.nextID
-
-	p, err := m.prepare(ctx, src)
-	if err != nil {
-		m.cleanupPrepared(prepared)
-
-		return res, fmt.Errorf("preparing source: %w", err)
-	}
 	m.nextID++
-	p.prevChecksum = src.checksum
+	p.prevChecksum = 0
 
 	src.ensureName(p.name)
 	src.RulesCount = p.count
@@ -460,84 +456,136 @@ func (m *sourceManager) stageRemove(srcURL string) (res sourceStageResult, err e
 	return res, nil
 }
 
-func (m *sourceManager) stageSet(ctx context.Context, oldURL string, data UpstreamDNSSourceYAML) (res sourceStageResult, err error) {
-	staged := m.cloneSources()
-	idx := slices.IndexFunc(staged, func(src UpstreamDNSSourceYAML) bool { return src.URL == oldURL })
+// setPlan describes a source update after inspecting the current state.
+type setPlan struct {
+	oldURL           string
+	data             UpstreamDNSSourceYAML
+	current          UpstreamDNSSourceYAML
+	needsPrepare     bool
+	metadataChanged  bool
+	semanticChanged  bool
+	prevEnabled      bool
+}
+
+// planSet inspects the current source list and returns whether a download is
+// required.  It must be called under a read or write lock that protects the
+// source list.
+func (m *sourceManager) planSet(oldURL string, data UpstreamDNSSourceYAML) (plan setPlan, err error) {
+	idx := slices.IndexFunc(m.conf.UpstreamDNSSources, func(src UpstreamDNSSourceYAML) bool {
+		return src.URL == oldURL
+	})
 	if idx < 0 {
+		return plan, errors.New("url doesn't exist")
+	}
+
+	if oldURL != data.URL && slices.ContainsFunc(m.conf.UpstreamDNSSources, func(src UpstreamDNSSourceYAML) bool {
+		return src.URL == data.URL
+	}) {
+		return plan, errors.New("url already exists")
+	}
+
+	current := m.conf.UpstreamDNSSources[idx]
+	plan = setPlan{
+		oldURL:      oldURL,
+		data:        data,
+		current:     current.clone(),
+		prevEnabled: current.Enabled,
+	}
+
+	if current.Name != data.Name {
+		plan.metadataChanged = true
+	}
+	if current.URL != data.URL {
+		plan.semanticChanged = true
+		plan.needsPrepare = data.Enabled
+	}
+	if current.Enabled != data.Enabled {
+		plan.semanticChanged = true
+		plan.needsPrepare = data.Enabled
+	}
+
+	return plan, nil
+}
+
+// stageSetPrepared applies a previously computed set plan.  prepared may be
+// empty when no download was required.  Must be called under upstreamSourcesMu.
+func (m *sourceManager) stageSetPrepared(plan setPlan, prepared sourcePrepared) (res sourceStageResult, err error) {
+	staged := m.cloneSources()
+	idx := slices.IndexFunc(staged, func(src UpstreamDNSSourceYAML) bool { return src.URL == plan.oldURL })
+	if idx < 0 {
+		if prepared.tmpPath != "" {
+			_ = os.Remove(prepared.tmpPath)
+		}
+
 		return res, errors.New("url doesn't exist")
 	}
 
-	if oldURL != data.URL && slices.ContainsFunc(staged, func(src UpstreamDNSSourceYAML) bool { return src.URL == data.URL }) {
+	if plan.oldURL != plan.data.URL && slices.ContainsFunc(staged, func(src UpstreamDNSSourceYAML) bool {
+		return src.URL == plan.data.URL
+	}) {
+		if prepared.tmpPath != "" {
+			_ = os.Remove(prepared.tmpPath)
+		}
+
 		return res, errors.New("url already exists")
 	}
 
 	src := staged[idx]
-	prepared := make([]sourcePrepared, len(staged))
+	preparedList := make([]sourcePrepared, len(staged))
 
-	metadataChanged := false
-	semanticChanged := false
-	needsPrepare := false
-	prevEnabled := src.Enabled
-
-	if src.Name != data.Name {
-		src.Name = data.Name
-		metadataChanged = true
+	if src.Name != plan.data.Name {
+		src.Name = plan.data.Name
 	}
-
-	if src.URL != data.URL {
-		src.URL = data.URL
+	if src.URL != plan.data.URL {
+		src.URL = plan.data.URL
 		src.clear()
-		semanticChanged = true
-		needsPrepare = data.Enabled
 	}
-
-	if src.Enabled != data.Enabled {
-		src.Enabled = data.Enabled
-		semanticChanged = true
-		needsPrepare = data.Enabled
-		if !data.Enabled {
+	if src.Enabled != plan.data.Enabled {
+		src.Enabled = plan.data.Enabled
+		if !plan.data.Enabled {
 			src.clear()
 		}
 	}
 
 	hadContentChange := false
-	if needsPrepare {
-		p, prepErr := m.prepare(ctx, src.clone())
-		if prepErr != nil {
-			m.cleanupPrepared(prepared)
-
-			return res, prepErr
+	if plan.needsPrepare {
+		if prepared.tmpPath == "" {
+			return res, errors.New("prepared source is missing")
 		}
-		p.prevChecksum = src.checksum
 
-		hadContentChange = p.checksum != src.checksum
-		src.ensureName(p.name)
-		src.RulesCount = p.count
-		src.checksum = p.checksum
-		src.LastUpdated = p.lastUpdated
-		prepared[idx] = p
+		prepared.prevChecksum = src.checksum
+		hadContentChange = prepared.checksum != src.checksum
+		src.ensureName(prepared.name)
+		src.RulesCount = prepared.count
+		src.checksum = prepared.checksum
+		src.LastUpdated = prepared.lastUpdated
+		preparedList[idx] = prepared
 	}
 
 	staged[idx] = src
 
 	res = sourceStageResult{
 		staged:          staged,
-		prepared:        prepared,
-		requiresRestart: (semanticChanged && (prevEnabled || src.Enabled)) || hadContentChange,
+		prepared:        preparedList,
+		requiresRestart: (plan.semanticChanged && (plan.prevEnabled || src.Enabled)) || hadContentChange,
 		updated:         boolToInt(hadContentChange),
 	}
 
-	if !metadataChanged && !semanticChanged {
+	if !plan.metadataChanged && !plan.semanticChanged {
 		res.staged = nil
 	}
 
 	return res, nil
 }
 
-func (m *sourceManager) stageRefresh(ctx context.Context) (res sourceStageResult, err error) {
+// stageRefreshPrepared merges prepared refresh results for sources that are
+// still present and enabled.  Must be called under upstreamSourcesMu.
+func (m *sourceManager) stageRefreshPrepared(
+	preparedByID map[uint64]sourcePrepared,
+	warnings []error,
+) (res sourceStageResult) {
 	staged := m.cloneSources()
 	prepared := make([]sourcePrepared, len(staged))
-	warnings := []error{}
 	updated := 0
 	refreshed := 0
 
@@ -547,14 +595,12 @@ func (m *sourceManager) stageRefresh(ctx context.Context) (res sourceStageResult
 			continue
 		}
 
-		p, prepErr := m.prepare(ctx, src.clone())
-		if prepErr != nil {
-			warnings = append(warnings, fmt.Errorf("preparing source %q: %w", src.URL, prepErr))
-
+		p, ok := preparedByID[src.ID]
+		if !ok {
 			continue
 		}
-		p.prevChecksum = src.checksum
 
+		p.prevChecksum = src.checksum
 		refreshed++
 		wasUpdated := p.checksum != src.checksum
 
@@ -569,10 +615,19 @@ func (m *sourceManager) stageRefresh(ctx context.Context) (res sourceStageResult
 		}
 	}
 
-	if refreshed == 0 && len(warnings) > 0 {
-		m.cleanupPrepared(prepared)
+	// Drop prepared files that no longer map to an active source.
+	for id, p := range preparedByID {
+		keep := false
+		for i := range staged {
+			if staged[i].ID == id && prepared[i].tmpPath != "" {
+				keep = true
 
-		return res, errors.Join(warnings...)
+				break
+			}
+		}
+		if !keep && p.tmpPath != "" {
+			_ = os.Remove(p.tmpPath)
+		}
 	}
 
 	res = sourceStageResult{
@@ -583,7 +638,7 @@ func (m *sourceManager) stageRefresh(ctx context.Context) (res sourceStageResult
 		warnings:        warnings,
 	}
 
-	return res, nil
+	return res
 }
 
 func boolToInt(v bool) int {

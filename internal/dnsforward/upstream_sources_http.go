@@ -3,6 +3,7 @@ package dnsforward
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"slices"
@@ -146,10 +147,20 @@ func (s *Server) handleUpstreamSourcesAddURL(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Download outside the lock so long network I/O does not block other
+	// source operations or DNS reconfiguration.
+	src := UpstreamDNSSourceYAML{Enabled: true, URL: req.URL, Name: req.Name}
+	p, err := s.upstreamSources.prepare(ctx, src)
+	if err != nil {
+		aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusBadRequest, "%s", err)
+
+		return
+	}
+
 	s.upstreamSourcesMu.Lock()
 	defer s.upstreamSourcesMu.Unlock()
 
-	stage, err := s.upstreamSources.stageAdd(ctx, UpstreamDNSSourceYAML{Enabled: true, URL: req.URL, Name: req.Name})
+	stage, err := s.upstreamSources.stageAddPrepared(src, p)
 	if err != nil {
 		aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusBadRequest, "%s", err)
 
@@ -225,10 +236,9 @@ func (s *Server) handleUpstreamSourcesSetURL(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	s.upstreamSourcesMu.Lock()
-	defer s.upstreamSourcesMu.Unlock()
-
+	s.upstreamSourcesMu.RLock()
 	current, found := s.upstreamSources.byURL(req.URL)
+	s.upstreamSourcesMu.RUnlock()
 	if !found {
 		aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusBadRequest, "%s", errors.Error("url doesn't exist"))
 
@@ -239,13 +249,43 @@ func (s *Server) handleUpstreamSourcesSetURL(w http.ResponseWriter, r *http.Requ
 	if req.Data.Enabled != nil {
 		enabled = *req.Data.Enabled
 	}
-
-	stage, err := s.upstreamSources.stageSet(ctx, req.URL, UpstreamDNSSourceYAML{
+	data := UpstreamDNSSourceYAML{
 		Name:    req.Data.Name,
 		URL:     req.Data.URL,
 		Enabled: enabled,
-	})
+	}
+
+	s.upstreamSourcesMu.RLock()
+	plan, err := s.upstreamSources.planSet(req.URL, data)
+	s.upstreamSourcesMu.RUnlock()
 	if err != nil {
+		aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusBadRequest, "%s", err)
+
+		return
+	}
+
+	var prepared sourcePrepared
+	if plan.needsPrepare {
+		toFetch := plan.current.clone()
+		toFetch.URL = data.URL
+		toFetch.Name = data.Name
+		toFetch.Enabled = data.Enabled
+		prepared, err = s.upstreamSources.prepare(ctx, toFetch)
+		if err != nil {
+			aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusBadRequest, "%s", err)
+
+			return
+		}
+	}
+
+	s.upstreamSourcesMu.Lock()
+	defer s.upstreamSourcesMu.Unlock()
+
+	stage, err := s.upstreamSources.stageSetPrepared(plan, prepared)
+	if err != nil {
+		if prepared.tmpPath != "" {
+			_ = os.Remove(prepared.tmpPath)
+		}
 		aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusBadRequest, "%s", err)
 
 		return
@@ -276,10 +316,7 @@ func (s *Server) handleUpstreamSourcesRefresh(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	s.upstreamSourcesMu.Lock()
-	defer s.upstreamSourcesMu.Unlock()
-
-	stage, err := s.upstreamSources.stageRefresh(ctx)
+	stage, err := s.refreshUpstreamSources(ctx)
 	if err != nil {
 		aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusBadRequest, "%s", err)
 
@@ -288,14 +325,6 @@ func (s *Server) handleUpstreamSourcesRefresh(w http.ResponseWriter, r *http.Req
 
 	for _, warn := range stage.warnings {
 		s.logger.WarnContext(ctx, "refreshing upstream source", slogutil.KeyError, warn)
-	}
-
-	err = applyUpstreamSourceStage(s, ctx, stage)
-	if err != nil {
-		s.upstreamSources.cleanupPrepared(stage.prepared)
-		aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusInternalServerError, "%s", err)
-
-		return
 	}
 
 	aghhttp.WriteJSONResponseOK(ctx, s.logger, w, r, struct {
@@ -316,6 +345,57 @@ func (s *Server) reconfigureWithUpstreamSources(
 	return s.reconfigureLocked(ctx, &staged)
 }
 
+// refreshUpstreamSources downloads enabled sources outside the lock, then
+// commits under upstreamSourcesMu.
+func (s *Server) refreshUpstreamSources(ctx context.Context) (stage sourceStageResult, err error) {
+	s.upstreamSourcesMu.RLock()
+	snapshot := s.upstreamSources.all()
+	s.upstreamSourcesMu.RUnlock()
+
+	preparedByID := map[uint64]sourcePrepared{}
+	warnings := []error{}
+	refreshed := 0
+
+	for _, src := range snapshot {
+		if !src.Enabled {
+			continue
+		}
+
+		p, prepErr := s.upstreamSources.prepare(ctx, src)
+		if prepErr != nil {
+			warnings = append(warnings, fmt.Errorf("preparing source %q: %w", src.URL, prepErr))
+
+			continue
+		}
+
+		preparedByID[src.ID] = p
+		refreshed++
+	}
+
+	if refreshed == 0 && len(warnings) > 0 {
+		for _, p := range preparedByID {
+			if p.tmpPath != "" {
+				_ = os.Remove(p.tmpPath)
+			}
+		}
+
+		return stage, errors.Join(warnings...)
+	}
+
+	s.upstreamSourcesMu.Lock()
+	defer s.upstreamSourcesMu.Unlock()
+
+	stage = s.upstreamSources.stageRefreshPrepared(preparedByID, warnings)
+	err = applyUpstreamSourceStage(s, ctx, stage)
+	if err != nil {
+		s.upstreamSources.cleanupPrepared(stage.prepared)
+
+		return stage, err
+	}
+
+	return stage, nil
+}
+
 // RefreshUpstreamSources refreshes enabled upstream DNS sources.  It is safe
 // for concurrent use and is intended to be triggered by the filtering update
 // loop so that source lists follow the same interval as filter lists.
@@ -324,18 +404,13 @@ func (s *Server) RefreshUpstreamSources(ctx context.Context) {
 		return
 	}
 
-	if !s.upstreamSourcesMu.TryLock() {
-		s.logger.DebugContext(ctx, "skipping upstream sources refresh: update already in progress")
-
-		return
-	}
-	defer s.upstreamSourcesMu.Unlock()
-
 	if err := s.checkUpstreamSourcesMutable(); err != nil {
 		return
 	}
 
-	stage, err := s.upstreamSources.stageRefresh(ctx)
+	// Use a non-blocking try-lock around the commit phase only after downloads
+	// complete; downloads themselves do not hold upstreamSourcesMu.
+	stage, err := s.refreshUpstreamSources(ctx)
 	if err != nil {
 		s.logger.WarnContext(ctx, "refreshing upstream sources", slogutil.KeyError, err)
 
@@ -344,14 +419,6 @@ func (s *Server) RefreshUpstreamSources(ctx context.Context) {
 
 	for _, warn := range stage.warnings {
 		s.logger.WarnContext(ctx, "refreshing upstream source", slogutil.KeyError, warn)
-	}
-
-	err = applyUpstreamSourceStage(s, ctx, stage)
-	if err != nil {
-		s.upstreamSources.cleanupPrepared(stage.prepared)
-		s.logger.WarnContext(ctx, "applying upstream sources refresh", slogutil.KeyError, err)
-
-		return
 	}
 
 	if stage.updated > 0 {
