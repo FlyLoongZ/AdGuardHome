@@ -487,6 +487,11 @@ func (s *Server) startLocked(ctx context.Context) error {
 	return err
 }
 
+// testPrepareHook, if non-nil, is called from Prepare after upstream source
+// caches have been loaded.  Tests use it to inject failures after loadMetadata
+// has already observed the on-disk caches.
+var testPrepareHook func(s *Server) (err error)
+
 // Prepare initializes parameters of s using data from conf.  conf must not be
 // nil.
 func (s *Server) Prepare(ctx context.Context, conf *ServerConfig) (err error) {
@@ -496,6 +501,13 @@ func (s *Server) Prepare(ctx context.Context, conf *ServerConfig) (err error) {
 	// Fetch enabled upstream sources whose caches are missing before loading
 	// upstreams, so rules from configuration are not silently dropped.
 	s.upstreamSources.ensureCaches(ctx)
+
+	if testPrepareHook != nil {
+		err = testPrepareHook(s)
+		if err != nil {
+			return err
+		}
+	}
 
 	// dnsFilter can be nil during application update.
 	if s.dnsFilter != nil {

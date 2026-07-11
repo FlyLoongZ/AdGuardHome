@@ -539,16 +539,18 @@ func (m *sourceManager) finalizeRemoved(prev, staged []UpstreamDNSSourceYAML) {
 	}
 }
 
-// cleanupStaleCacheFiles removes leftover temporary and backup cache files.
-// Only temporary/backup artifacts are removed; permanent {id}.txt files are
-// left alone because they may belong to filtering-rule lists.
+// cleanupStaleCacheFiles removes leftover temporary and legacy cache files.
+// Permanent {id}.txt files are left alone because they may belong to
+// filtering-rule lists.  Active {id}.txt.old commit backups are also preserved
+// so a reconfigure that recreates the manager cannot destroy an in-flight
+// rollback transaction; those backups are removed by cleanupCommitBackups or
+// finalizeRemoved after the transaction settles.
 func (m *sourceManager) cleanupStaleCacheFiles() {
 	if m.dataDir == "" {
 		return
 	}
 
 	patterns := []string{
-		filepath.Join(m.cacheDir(), "*.txt.old"),
 		filepath.Join(m.cacheDir(), "src-*.tmp"),
 		filepath.Join(m.cacheDir(), "upstream-*.txt"),
 		filepath.Join(m.cacheDir(), "upstream-*.txt.old"),

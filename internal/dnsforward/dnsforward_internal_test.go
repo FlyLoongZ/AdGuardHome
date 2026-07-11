@@ -717,6 +717,97 @@ func TestSourceManager_CommitUnchanged_AdvancesMtime(t *testing.T) {
 	assert.Equal(t, p.lastUpdated.Unix(), loaded.LastUpdated.Unix())
 }
 
+func TestApplyUpstreamSourceStage_ReconfigureFailureReloadsAfterRollback(t *testing.T) {
+	ctx := testutil.ContextWithTimeout(t, testTimeout)
+	tmpDir := t.TempDir()
+	oldContent := "[/example.org/]1.1.1.1\n"
+	newContent := "[/example.org/]9.9.9.9\n"
+	srcPath := filepath.Join(tmpDir, "upstreams.txt")
+	require.NoError(t, os.WriteFile(srcPath, []byte(oldContent), 0o644))
+
+	dataDir := filepath.Join(tmpDir, "data")
+	srv := createTestServer(t, &filtering.Config{
+		FilteringEnabled: true,
+		BlockingMode:     filtering.BlockingModeDefault,
+		DataDir:          dataDir,
+		SafeFSPatterns:   []string{filepath.Join(tmpDir, "*")},
+	}, ServerConfig{
+		Config: Config{
+			UpstreamDNS:  []string{"114.114.114.114:53"},
+			UpstreamMode: UpstreamModeLoadBalance,
+			UpstreamDNSSources: []UpstreamDNSSourceYAML{{
+				Enabled:           true,
+				URL:               srcPath,
+				Name:              "local",
+				UpstreamDNSSource: UpstreamDNSSource{ID: 1},
+			}},
+			EDNSClientSubnet: &EDNSClientSubnet{},
+			ClientsContainer: EmptyClientsContainer{},
+		},
+		TLSConf:        &TLSConfig{},
+		ConfModifier:   agh.EmptyConfigModifier{},
+		ServePlainDNS:  true,
+		UDPListenAddrs: []*net.UDPAddr{},
+		TCPListenAddrs: []*net.TCPAddr{},
+	})
+
+	cachePath := srv.conf.UpstreamDNSSources[0].path(dataDir)
+	oldCache, err := os.ReadFile(cachePath)
+	require.NoError(t, err)
+	require.Equal(t, oldContent, string(oldCache))
+	oldChecksum := srv.upstreamSources.conf.UpstreamDNSSources[0].checksum
+	oldUpdated := srv.upstreamSources.conf.UpstreamDNSSources[0].LastUpdated
+
+	require.NoError(t, os.WriteFile(srcPath, []byte(newContent), 0o644))
+	p, err := srv.upstreamSources.prepare(ctx, srv.upstreamSources.conf.UpstreamDNSSources[0])
+	require.NoError(t, err)
+	p.prevChecksum = oldChecksum
+
+	staged := srv.upstreamSources.cloneSources()
+	staged[0].RulesCount = p.count
+	staged[0].checksum = p.checksum
+	staged[0].LastUpdated = p.lastUpdated
+	prepared := make([]sourcePrepared, len(staged))
+	prepared[0] = p
+
+	prepareCalls := 0
+	testPrepareHook = func(s *Server) (err error) {
+		prepareCalls++
+		// Fail only the upgrade attempt so reconfigure restores against the
+		// still-new on-disk caches; the post-rollback reload must succeed.
+		if prepareCalls == 1 {
+			return fmt.Errorf("forced reconfigure failure")
+		}
+
+		return nil
+	}
+	t.Cleanup(func() { testPrepareHook = nil })
+
+	srv.upstreamSourcesMu.Lock()
+	err = applyUpstreamSourceStage(srv, ctx, sourceStageResult{
+		staged:          staged,
+		prepared:        prepared,
+		requiresRestart: true,
+	})
+	srv.upstreamSourcesMu.Unlock()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "forced reconfigure failure")
+	require.GreaterOrEqual(t, prepareCalls, 2)
+
+	got, err := os.ReadFile(cachePath)
+	require.NoError(t, err)
+	assert.Equal(t, oldContent, string(got))
+
+	live := srv.upstreamSources.conf.UpstreamDNSSources[0]
+	assert.Equal(t, oldChecksum, live.checksum)
+	assert.Equal(t, oldUpdated.Unix(), live.LastUpdated.Unix())
+
+	loaded, err := srv.conf.loadUpstreams(ctx, testLogger, dataDir)
+	require.NoError(t, err)
+	assert.Contains(t, loaded, "[/example.org/]1.1.1.1")
+	assert.NotContains(t, loaded, "[/example.org/]9.9.9.9")
+}
+
 func TestSourceManager_CommitRollback(t *testing.T) {
 	tmpDir := t.TempDir()
 	srcPath := filepath.Join(tmpDir, "upstreams.txt")
@@ -920,9 +1011,11 @@ func TestSourceManager_CleanupStaleCacheFiles(t *testing.T) {
 	cacheDir := filepath.Join(dataDir, upstreamSourcesCacheDir)
 	require.NoError(t, os.MkdirAll(cacheDir, 0o755))
 
-	oldPath := filepath.Join(cacheDir, "upstream-1.txt.old")
+	legacyOldPath := filepath.Join(cacheDir, "upstream-1.txt.old")
+	activeBackup := filepath.Join(cacheDir, "1.txt.old")
 	tmpPath := filepath.Join(cacheDir, "src-xyz.tmp")
-	require.NoError(t, os.WriteFile(oldPath, []byte("old"), 0o644))
+	require.NoError(t, os.WriteFile(legacyOldPath, []byte("old"), 0o644))
+	require.NoError(t, os.WriteFile(activeBackup, []byte("backup"), 0o644))
 	require.NoError(t, os.WriteFile(tmpPath, []byte("tmp"), 0o644))
 
 	flt, err := filtering.New(&filtering.Config{
@@ -933,8 +1026,11 @@ func TestSourceManager_CleanupStaleCacheFiles(t *testing.T) {
 	require.NoError(t, err)
 	_ = newSourceManager(&ServerConfig{}, testLogger, flt)
 
-	_, err = os.Stat(oldPath)
+	_, err = os.Stat(legacyOldPath)
 	require.ErrorIs(t, err, os.ErrNotExist)
+	// Active commit backups must survive manager recreation so rollback can
+	// still restore them after a failed reconfigure.
+	require.FileExists(t, activeBackup)
 	_, err = os.Stat(tmpPath)
 	require.ErrorIs(t, err, os.ErrNotExist)
 }

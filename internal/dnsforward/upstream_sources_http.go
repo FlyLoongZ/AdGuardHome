@@ -128,7 +128,18 @@ func applyUpstreamSourceStage(
 	if stage.requiresRestart {
 		err = s.reconfigureWithUpstreamSources(ctx, stage.staged)
 		if err != nil {
+			// reconfigureLocked may already have restored conf while the new
+			// caches were still on disk, so metadata and loaded upstream rules
+			// can still reflect the failed update.  Restore the previous cache
+			// files first, then reload so runtime state matches the backups.
 			sm.rollbackCommitted(records)
+			if reloadErr := s.reconfigureLocked(ctx, nil); reloadErr != nil {
+				s.logger.ErrorContext(
+					ctx,
+					"reloading after upstream source cache rollback",
+					slogutil.KeyError, reloadErr,
+				)
+			}
 
 			return err
 		}
