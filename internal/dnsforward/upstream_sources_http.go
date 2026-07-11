@@ -3,16 +3,13 @@ package dnsforward
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"slices"
 	"time"
 
 	"github.com/AdguardTeam/AdGuardHome/internal/aghhttp"
 	"github.com/AdguardTeam/AdGuardHome/internal/aghnet"
-	"github.com/AdguardTeam/AdGuardHome/internal/aghos"
 	"github.com/AdguardTeam/golibs/errors"
 	"github.com/AdguardTeam/golibs/logutil/slogutil"
 	"github.com/AdguardTeam/golibs/stringutil"
@@ -103,6 +100,36 @@ func (s *Server) handleUpstreamSourcesStatus(w http.ResponseWriter, r *http.Requ
 	})
 }
 
+func applyUpstreamSourceStage(
+	s *Server,
+	ctx context.Context,
+	stage sourceStageResult,
+) (err error) {
+	if stage.staged == nil {
+		return nil
+	}
+
+	// Commit caches first so reconfigure always reads the final cache paths.
+	err = s.upstreamSources.commitPrepared(stage.staged, stage.prepared)
+	if err != nil {
+		return err
+	}
+
+	if stage.requiresRestart {
+		err = s.reconfigureWithUpstreamSources(ctx, stage.staged)
+		if err != nil {
+			return err
+		}
+	}
+
+	s.upstreamSources.finalizeRemoved(stage.staged)
+	s.upstreamSources.conf.UpstreamDNSSources = stage.staged
+	s.conf.UpstreamDNSSources = stage.staged
+	s.conf.ConfModifier.Apply(ctx)
+
+	return nil
+}
+
 func (s *Server) handleUpstreamSourcesAddURL(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if err := s.checkUpstreamSourcesMutable(); err != nil {
@@ -129,24 +156,13 @@ func (s *Server) handleUpstreamSourcesAddURL(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if stage.requiresRestart {
-		reErr := s.reconfigureWithUpstreamSources(ctx, stage.staged, stage.prepared)
-		if reErr != nil {
-			s.upstreamSources.cleanupPrepared(stage.prepared)
-			aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusInternalServerError, "%s", reErr)
-
-			return
-		}
-	}
-
-	err = s.upstreamSources.applyStaged(stage)
+	err = applyUpstreamSourceStage(s, ctx, stage)
 	if err != nil {
+		s.upstreamSources.cleanupPrepared(stage.prepared)
 		aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusInternalServerError, "%s", err)
 
 		return
 	}
-
-	s.conf.ConfModifier.Apply(ctx)
 
 	aghhttp.OK(ctx, s.logger, w)
 }
@@ -177,22 +193,12 @@ func (s *Server) handleUpstreamSourcesRemoveURL(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if stage.requiresRestart {
-		if reErr := s.reconfigureWithUpstreamSources(ctx, stage.staged, nil); reErr != nil {
-			aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusInternalServerError, "%s", reErr)
-
-			return
-		}
-	}
-
-	err = s.upstreamSources.applyStaged(stage)
+	err = applyUpstreamSourceStage(s, ctx, stage)
 	if err != nil {
 		aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusInternalServerError, "%s", err)
 
 		return
 	}
-
-	s.conf.ConfModifier.Apply(ctx)
 
 	aghhttp.OK(ctx, s.logger, w)
 }
@@ -251,23 +257,13 @@ func (s *Server) handleUpstreamSourcesSetURL(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if stage.requiresRestart {
-		if reErr := s.reconfigureWithUpstreamSources(ctx, stage.staged, stage.prepared); reErr != nil {
-			s.upstreamSources.cleanupPrepared(stage.prepared)
-			aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusInternalServerError, "%s", reErr)
-
-			return
-		}
-	}
-
-	err = s.upstreamSources.applyStaged(stage)
+	err = applyUpstreamSourceStage(s, ctx, stage)
 	if err != nil {
+		s.upstreamSources.cleanupPrepared(stage.prepared)
 		aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusInternalServerError, "%s", err)
 
 		return
 	}
-
-	s.conf.ConfModifier.Apply(ctx)
 
 	aghhttp.OK(ctx, s.logger, w)
 }
@@ -294,23 +290,13 @@ func (s *Server) handleUpstreamSourcesRefresh(w http.ResponseWriter, r *http.Req
 		s.logger.WarnContext(ctx, "refreshing upstream source", slogutil.KeyError, warn)
 	}
 
-	if stage.requiresRestart {
-		if reErr := s.reconfigureWithUpstreamSources(ctx, stage.staged, stage.prepared); reErr != nil {
-			s.upstreamSources.cleanupPrepared(stage.prepared)
-			aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusInternalServerError, "%s", reErr)
-
-			return
-		}
-	}
-
-	err = s.upstreamSources.applyStaged(stage)
+	err = applyUpstreamSourceStage(s, ctx, stage)
 	if err != nil {
+		s.upstreamSources.cleanupPrepared(stage.prepared)
 		aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusInternalServerError, "%s", err)
 
 		return
 	}
-
-	s.conf.ConfModifier.Apply(ctx)
 
 	aghhttp.WriteJSONResponseOK(ctx, s.logger, w, r, struct {
 		Updated int `json:"updated"`
@@ -320,83 +306,14 @@ func (s *Server) handleUpstreamSourcesRefresh(w http.ResponseWriter, r *http.Req
 func (s *Server) reconfigureWithUpstreamSources(
 	ctx context.Context,
 	sources []UpstreamDNSSourceYAML,
-	prepared []sourcePrepared,
 ) (err error) {
 	s.serverLock.RLock()
 	staged := s.conf
 	s.serverLock.RUnlock()
 
-	realDataDir := staged.DataDir
 	staged.UpstreamDNSSources = slices.Clone(sources)
 
-	// 清理之前进程崩溃后残留的 staging 目录
-	oldDirs, _ := filepath.Glob(filepath.Join(s.conf.DataDir, "upstream-sources-stage-*"))
-	for _, d := range oldDirs {
-		_ = os.RemoveAll(d)
-	}
-
-	cacheDir, err := os.MkdirTemp(s.conf.DataDir, "upstream-sources-stage-")
-	if err != nil {
-		return fmt.Errorf("creating staged cache dir: %w", err)
-	}
-	defer func() {
-		err = errors.WithDeferred(err, os.RemoveAll(cacheDir))
-	}()
-
-	staged.DataDir = cacheDir
-
-	preparedByID := map[uint64]sourcePrepared{}
-	for i, prep := range prepared {
-		if prep.tmpPath == "" || i >= len(sources) {
-			continue
-		}
-
-		preparedByID[sources[i].ID] = prep
-	}
-
-	for _, src := range sources {
-		if !src.Enabled {
-			continue
-		}
-
-		var data []byte
-		if prep, ok := preparedByID[src.ID]; ok {
-			data, err = os.ReadFile(prep.tmpPath)
-			if err != nil {
-				return fmt.Errorf("reading staged source cache: %w", err)
-			}
-		} else {
-			data, err = os.ReadFile(src.path(realDataDir))
-			if err != nil && !errors.Is(err, os.ErrNotExist) {
-				return fmt.Errorf("reading current source cache: %w", err)
-			} else if err != nil {
-				continue
-			}
-		}
-
-		target := src.path(staged.DataDir)
-		mkErr := os.MkdirAll(filepath.Dir(target), aghos.DefaultPermDir)
-		if mkErr != nil {
-			return fmt.Errorf("creating staged source cache dir: %w", mkErr)
-		}
-
-		writeErr := os.WriteFile(target, data, aghos.DefaultPermFile)
-		if writeErr != nil {
-			return fmt.Errorf("writing staged source cache: %w", writeErr)
-		}
-	}
-
-	err = s.reconfigureLocked(ctx, &staged)
-	if err != nil {
-		return err
-	}
-
-	s.serverLock.Lock()
-	s.conf.DataDir = realDataDir
-	s.upstreamSources.conf.DataDir = realDataDir
-	s.serverLock.Unlock()
-
-	return nil
+	return s.reconfigureLocked(ctx, &staged)
 }
 
 // appendUpstreamSourcesForTest appends enabled upstream DNS sources to the list

@@ -323,6 +323,20 @@ func (m *sourceManager) cloneSources() (sources []UpstreamDNSSourceYAML) {
 }
 
 func (m *sourceManager) applyPreparedLocked(staged []UpstreamDNSSourceYAML, prepared []sourcePrepared) (err error) {
+	err = m.commitPrepared(staged, prepared)
+	if err != nil {
+		return err
+	}
+
+	m.finalizeRemoved(staged)
+	m.conf.UpstreamDNSSources = staged
+
+	return nil
+}
+
+// commitPrepared writes prepared temporary caches into the final cache paths.
+// On failure, remaining temporary files are cleaned up.
+func (m *sourceManager) commitPrepared(staged []UpstreamDNSSourceYAML, prepared []sourcePrepared) (err error) {
 	for i := range prepared {
 		if prepared[i].tmpPath == "" {
 			continue
@@ -341,6 +355,11 @@ func (m *sourceManager) applyPreparedLocked(staged []UpstreamDNSSourceYAML, prep
 		prepared[i].tmpPath = ""
 	}
 
+	return nil
+}
+
+// finalizeRemoved renames cache files of sources that are no longer present.
+func (m *sourceManager) finalizeRemoved(staged []UpstreamDNSSourceYAML) {
 	removed := map[uint64]struct{}{}
 	for _, cur := range m.conf.UpstreamDNSSources {
 		if slices.ContainsFunc(staged, func(src UpstreamDNSSourceYAML) bool { return src.ID == cur.ID }) {
@@ -356,10 +375,6 @@ func (m *sourceManager) applyPreparedLocked(staged []UpstreamDNSSourceYAML, prep
 			m.logger.ErrorContext(context.Background(), "renaming source file", "path", path, slogutil.KeyError, rmErr)
 		}
 	}
-
-	m.conf.UpstreamDNSSources = staged
-
-	return nil
 }
 
 func (m *sourceManager) stageAdd(ctx context.Context, src UpstreamDNSSourceYAML) (res sourceStageResult, err error) {
