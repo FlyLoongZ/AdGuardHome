@@ -498,6 +498,10 @@ func (s *Server) Prepare(ctx context.Context, conf *ServerConfig) (err error) {
 	s.conf = *conf
 	s.upstreamSources = newSourceManager(&s.conf, s.logger, s.dnsFilter)
 
+	// Fetch enabled upstream sources whose caches are missing before loading
+	// upstreams, so rules from configuration are not silently dropped.
+	s.upstreamSources.ensureCaches(ctx)
+
 	// dnsFilter can be nil during application update.
 	if s.dnsFilter != nil {
 		mode, bIPv4, bIPv6 := s.dnsFilter.BlockingMode()

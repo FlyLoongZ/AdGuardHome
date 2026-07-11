@@ -570,6 +570,47 @@ func TestNewSourceManager_LoadsMetadataFromCache(t *testing.T) {
 	assert.NotZero(t, conf.UpstreamDNSSources[0].checksum)
 }
 
+func TestSourceManager_EnsureCaches_FetchesMissing(t *testing.T) {
+	tmpDir := t.TempDir()
+	srcPath := filepath.Join(tmpDir, "upstreams.txt")
+	require.NoError(t, os.WriteFile(srcPath, []byte("[/example.org/]1.1.1.1\n[/example.net/]9.9.9.9\n"), 0o644))
+
+	dataDir := filepath.Join(tmpDir, "data")
+	conf := &ServerConfig{
+		DataDir: dataDir,
+		Config: Config{
+			UpstreamDNSSources: []UpstreamDNSSourceYAML{{
+				Enabled: true,
+				URL:     srcPath,
+				Name:    "local",
+				UpstreamDNSSource: UpstreamDNSSource{ID: 1},
+			}},
+		},
+	}
+
+	flt, err := filtering.New(&filtering.Config{
+		Logger:          testLogger,
+		DataDir:         dataDir,
+		SafeFSPatterns:  []string{filepath.Join(tmpDir, "*")},
+		BlockedServices: emptyFilteringBlockedServices(),
+	}, nil)
+	require.NoError(t, err)
+
+	sm := newSourceManager(conf, testLogger, flt)
+	require.Zero(t, conf.UpstreamDNSSources[0].RulesCount)
+
+	_, err = os.Stat(conf.UpstreamDNSSources[0].path(dataDir))
+	require.ErrorIs(t, err, os.ErrNotExist)
+
+	ctx := testutil.ContextWithTimeout(t, testTimeout)
+	sm.ensureCaches(ctx)
+
+	require.Equal(t, 2, conf.UpstreamDNSSources[0].RulesCount)
+	assert.False(t, conf.UpstreamDNSSources[0].LastUpdated.IsZero())
+	_, err = os.Stat(conf.UpstreamDNSSources[0].path(dataDir))
+	require.NoError(t, err)
+}
+
 func TestServerWithProtectionDisabled(t *testing.T) {
 	s := createTestServer(t, &filtering.Config{
 		BlockingMode: filtering.BlockingModeDefault,

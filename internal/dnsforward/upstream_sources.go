@@ -567,3 +567,62 @@ func (m *sourceManager) all() (sources []UpstreamDNSSourceYAML) {
 
 	return sources
 }
+
+// ensureCaches downloads and commits enabled upstream sources whose cache
+// files are missing.  Failures are logged and skipped so that DNS startup is
+// not blocked by a single unreachable source.
+func (m *sourceManager) ensureCaches(ctx context.Context) {
+	if m.conf == nil || m.conf.UpstreamDNSFileName != "" {
+		return
+	}
+
+	for i := range m.conf.UpstreamDNSSources {
+		src := &m.conf.UpstreamDNSSources[i]
+		if !src.Enabled {
+			continue
+		}
+
+		cachePath := src.path(m.conf.DataDir)
+		_, err := os.Stat(cachePath)
+		if err == nil {
+			continue
+		}
+		if !stderrors.Is(err, os.ErrNotExist) {
+			m.logger.WarnContext(
+				ctx,
+				"checking upstream source cache",
+				"url", src.URL,
+				slogutil.KeyError, err,
+			)
+
+			continue
+		}
+
+		m.logger.InfoContext(ctx, "upstream source cache missing, fetching", "url", src.URL)
+
+		p, prepErr := m.prepare(ctx, src.clone())
+		if prepErr != nil {
+			m.logger.WarnContext(
+				ctx,
+				"fetching missing upstream source cache",
+				"url", src.URL,
+				slogutil.KeyError, prepErr,
+			)
+
+			continue
+		}
+
+		p.prevChecksum = src.checksum
+
+		_, commitErr := m.commit(src, p)
+		if commitErr != nil {
+			_ = os.Remove(p.tmpPath)
+			m.logger.WarnContext(
+				ctx,
+				"committing missing upstream source cache",
+				"url", src.URL,
+				slogutil.KeyError, commitErr,
+			)
+		}
+	}
+}
