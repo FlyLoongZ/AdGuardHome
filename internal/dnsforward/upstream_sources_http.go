@@ -378,7 +378,7 @@ func (s *Server) handleUpstreamSourcesRefresh(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	stage, err := s.refreshUpstreamSources(ctx)
+	stage, err := s.refreshUpstreamSources(ctx, true)
 	if err != nil {
 		aghhttp.ErrorAndLog(ctx, s.logger, r, w, http.StatusBadRequest, "%s", err)
 
@@ -408,10 +408,12 @@ func (s *Server) reconfigureWithUpstreamSources(
 }
 
 // refreshUpstreamSources downloads enabled sources outside the lock, then
-// commits under upstreamSourcesMu.
-func (s *Server) refreshUpstreamSources(ctx context.Context) (stage sourceStageResult, err error) {
+// commits under upstreamSourcesMu.  When force is false, sources that have not
+// yet reached the shared filters update interval are skipped.
+func (s *Server) refreshUpstreamSources(ctx context.Context, force bool) (stage sourceStageResult, err error) {
 	s.upstreamSourcesMu.RLock()
 	snapshot := s.upstreamSources.all()
+	intervalHours := s.upstreamSources.updateIntervalHours()
 	s.upstreamSourcesMu.RUnlock()
 
 	preparedByID := map[uint64]sourcePrepared{}
@@ -419,7 +421,7 @@ func (s *Server) refreshUpstreamSources(ctx context.Context) (stage sourceStageR
 	refreshed := 0
 
 	for _, src := range snapshot {
-		if !src.Enabled {
+		if !shouldRefresh(src, intervalHours, force) {
 			continue
 		}
 
@@ -434,14 +436,18 @@ func (s *Server) refreshUpstreamSources(ctx context.Context) (stage sourceStageR
 		refreshed++
 	}
 
-	if refreshed == 0 && len(warnings) > 0 {
-		for _, p := range preparedByID {
-			if p.tmpPath != "" {
-				_ = os.Remove(p.tmpPath)
+	if refreshed == 0 {
+		if len(warnings) > 0 {
+			for _, p := range preparedByID {
+				if p.tmpPath != "" {
+					_ = os.Remove(p.tmpPath)
+				}
 			}
+
+			return stage, errors.Join(warnings...)
 		}
 
-		return stage, errors.Join(warnings...)
+		return stage, nil
 	}
 
 	s.upstreamSourcesMu.Lock()
@@ -458,10 +464,10 @@ func (s *Server) refreshUpstreamSources(ctx context.Context) (stage sourceStageR
 	return stage, nil
 }
 
-// RefreshUpstreamSources refreshes enabled upstream DNS sources.  It is safe
-// for concurrent use and is intended to be triggered by the filtering update
-// loop so that source lists follow the same interval as filter lists.
-func (s *Server) RefreshUpstreamSources(ctx context.Context) {
+// RefreshUpstreamSources refreshes enabled upstream DNS sources.  force bypasses
+// the shared filters_update_interval expiry.  It is safe for concurrent use and
+// is intended to be triggered by the filtering update loop.
+func (s *Server) RefreshUpstreamSources(ctx context.Context, force bool) {
 	if s == nil {
 		return
 	}
@@ -470,9 +476,7 @@ func (s *Server) RefreshUpstreamSources(ctx context.Context) {
 		return
 	}
 
-	// Use a non-blocking try-lock around the commit phase only after downloads
-	// complete; downloads themselves do not hold upstreamSourcesMu.
-	stage, err := s.refreshUpstreamSources(ctx)
+	stage, err := s.refreshUpstreamSources(ctx, force)
 	if err != nil {
 		s.logger.WarnContext(ctx, "refreshing upstream sources", slogutil.KeyError, err)
 

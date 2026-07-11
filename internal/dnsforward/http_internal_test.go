@@ -652,7 +652,7 @@ func TestServer_UpstreamSourcesHTTP(t *testing.T) {
 		assert.True(t, sources[0].LastUpdated.IsZero())
 	})
 
-	t.Run("refresh_without_changes_keeps_timestamp", func(t *testing.T) {
+	t.Run("refresh_without_changes_advances_timestamp", func(t *testing.T) {
 		r := httptest.NewRequest(http.MethodPost, "/control/upstream_dns_sources/set_url", reqBody(map[string]any{
 			"url": localSrcPath,
 			"data": map[string]any{
@@ -668,6 +668,10 @@ func TestServer_UpstreamSourcesHTTP(t *testing.T) {
 		before := srv.upstreamSources.all()[0].LastUpdated
 		require.False(t, before.IsZero())
 
+		// Ensure the shared interval would otherwise skip this source so the
+		// forced manual refresh path is what advances LastUpdated.
+		time.Sleep(time.Millisecond)
+
 		r = httptest.NewRequest(http.MethodPost, "/control/upstream_dns_sources/refresh", reqBody(map[string]any{}))
 		w = httptest.NewRecorder()
 		srv.handleUpstreamSourcesRefresh(w, r.WithContext(ctx))
@@ -680,7 +684,7 @@ func TestServer_UpstreamSourcesHTTP(t *testing.T) {
 		assert.Equal(t, 0, body.Updated)
 
 		after := srv.upstreamSources.all()[0].LastUpdated
-		assert.Equal(t, before, after)
+		assert.True(t, after.After(before))
 	})
 
 	t.Run("remove", func(t *testing.T) {

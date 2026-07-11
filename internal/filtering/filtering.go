@@ -116,9 +116,9 @@ type Config struct {
 	// HTTPClient is the client to use for updating the remote filters.
 	HTTPClient *http.Client `yaml:"-"`
 
-	// AfterUpdate is an optional callback invoked after a periodic filter
-	// update attempt.  It may be nil.
-	AfterUpdate func(ctx context.Context) `yaml:"-"`
+	// AfterUpdate is an optional callback invoked after a filter update attempt.
+	// force is true when the refresh was requested manually.  It may be nil.
+	AfterUpdate func(ctx context.Context, force bool) `yaml:"-"`
 
 	// filtersMu protects filter lists.
 	filtersMu *sync.RWMutex
@@ -1109,6 +1109,16 @@ func (d *DNSFilter) ReserveListID(id uint64) {
 	d.idGen.reserve(rules.ListID(id))
 }
 
+// FiltersUpdateIntervalHours returns the configured filter-list update interval
+// in hours.  Zero means automatic updates are disabled.
+func (d *DNSFilter) FiltersUpdateIntervalHours() (hours uint32) {
+	if d == nil || d.conf == nil {
+		return 0
+	}
+
+	return d.conf.FiltersUpdateIntervalHours
+}
+
 // validateSafeFSPatterns validates and stores patterns for local filtering‑rule
 // files.
 func (d *DNSFilter) validateSafeFSPatterns(patterns []string) (err error) {
@@ -1175,7 +1185,7 @@ func (d *DNSFilter) periodicallyRefreshFilters(ivl time.Duration) (nextIvl time.
 	_, isNetErr, ok = d.tryRefreshFilters(true, true, false)
 
 	if d.conf.AfterUpdate != nil {
-		d.conf.AfterUpdate(context.TODO())
+		d.conf.AfterUpdate(context.TODO(), false)
 	}
 
 	if ok && !isNetErr {

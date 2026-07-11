@@ -775,10 +775,13 @@ func (m *sourceManager) stageRefreshPrepared(
 		src.ensureName(p.name)
 		src.RulesCount = p.count
 		src.checksum = p.checksum
+		// Always advance LastUpdated after a successful refresh attempt so the
+		// shared filters_update_interval expiry works even when content is
+		// unchanged, matching filtering-rule list behaviour.
+		src.LastUpdated = p.lastUpdated
 		prepared[i] = p
 
 		if wasUpdated {
-			src.LastUpdated = p.lastUpdated
 			updated++
 		}
 	}
@@ -807,6 +810,36 @@ func (m *sourceManager) stageRefreshPrepared(
 	}
 
 	return res
+}
+
+// shouldRefresh reports whether src should be downloaded.  force bypasses the
+// update interval.  intervalHours of 0 disables non-forced refreshes, matching
+// the filtering-rule list behaviour.
+func shouldRefresh(src UpstreamDNSSourceYAML, intervalHours uint32, force bool) (ok bool) {
+	if !src.Enabled {
+		return false
+	}
+	if force {
+		return true
+	}
+	if intervalHours == 0 {
+		return false
+	}
+	if src.LastUpdated.IsZero() {
+		return true
+	}
+
+	exp := src.LastUpdated.Add(time.Duration(intervalHours) * time.Hour)
+
+	return !time.Now().Before(exp)
+}
+
+func (m *sourceManager) updateIntervalHours() (hours uint32) {
+	if m.filter == nil {
+		return 0
+	}
+
+	return m.filter.FiltersUpdateIntervalHours()
 }
 
 func boolToInt(v bool) int {

@@ -398,6 +398,10 @@ func (d *DNSFilter) handleFilteringRefresh(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	if d.conf.AfterUpdate != nil {
+		d.conf.AfterUpdate(ctx, true)
+	}
+
 	aghhttp.WriteJSONResponseOK(ctx, l, w, r, resp)
 }
 

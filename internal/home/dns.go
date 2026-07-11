@@ -491,11 +491,12 @@ func startDNSServer() (err error) {
 		return fmt.Errorf("starting dns server: %w", err)
 	}
 
-	// Refresh upstream DNS sources on the same schedule as filtering-rule
-	// lists.  Downloads still go through filtering.DNSFilter.Reader.
+	// Refresh upstream DNS sources from the filtering update loop.  Periodic
+	// ticks use the shared filters_update_interval expiry; manual filter
+	// refreshes force a full source download.
 	if config.Filtering != nil {
-		config.Filtering.AfterUpdate = func(updateCtx context.Context) {
-			globalContext.dnsServer.RefreshUpstreamSources(updateCtx)
+		config.Filtering.AfterUpdate = func(updateCtx context.Context, force bool) {
+			globalContext.dnsServer.RefreshUpstreamSources(updateCtx, force)
 		}
 	}
 

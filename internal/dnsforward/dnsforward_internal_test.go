@@ -826,6 +826,28 @@ func TestSourceManager_StageSetPrepared_RejectsStaleID(t *testing.T) {
 	assert.Contains(t, err.Error(), "changed")
 }
 
+func TestShouldRefresh(t *testing.T) {
+	now := time.Now()
+	src := UpstreamDNSSourceYAML{
+		Enabled:     true,
+		LastUpdated: now,
+	}
+
+	assert.False(t, shouldRefresh(src, 24, false))
+	assert.True(t, shouldRefresh(src, 24, true))
+	assert.False(t, shouldRefresh(src, 0, false))
+	assert.True(t, shouldRefresh(src, 0, true))
+
+	src.LastUpdated = now.Add(-25 * time.Hour)
+	assert.True(t, shouldRefresh(src, 24, false))
+
+	src.LastUpdated = time.Time{}
+	assert.True(t, shouldRefresh(src, 24, false))
+
+	src.Enabled = false
+	assert.False(t, shouldRefresh(src, 24, true))
+}
+
 func TestSourceManager_CleanupStaleCacheFiles(t *testing.T) {
 	dataDir := t.TempDir()
 	cacheDir := filepath.Join(dataDir, upstreamSourcesCacheDir)
