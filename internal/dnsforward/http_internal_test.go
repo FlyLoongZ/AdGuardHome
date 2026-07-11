@@ -855,6 +855,9 @@ func TestServer_HandleUpstreamDNSSources_RefreshPartialSuccess(t *testing.T) {
 	require.Len(t, sourcesBefore, 2)
 	goodBefore := sourcesBefore[0].LastUpdated
 	badBefore := sourcesBefore[1].LastUpdated
+	// Change the good source so refresh reports an update.  Prepare already
+	// fetched the original contents via ensureCaches during server setup.
+	require.NoError(t, os.WriteFile(goodSrcPath, []byte("[/example.org/]8.8.8.8\n"), 0o644))
 	require.NoError(t, os.WriteFile(badSrcPath, []byte("udp://://bad\n"), 0o644))
 
 	reqBody := func(v any) io.ReadCloser {

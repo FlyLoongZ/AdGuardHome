@@ -100,6 +100,19 @@ type sourcePrepared struct {
 	lastUpdated  time.Time
 }
 
+// commitRecord describes a cache file replacement performed by commit.  It is
+// used to roll the filesystem back when a later step (for example reconfigure)
+// fails after caches have already been written.
+type commitRecord struct {
+	// dst is the final cache path filters/{id}.txt.
+	dst string
+	// backup is dst+".old" when an existing cache was moved aside; empty when
+	// the cache file was newly created.
+	backup string
+	// created is true when dst did not exist before the commit.
+	created bool
+}
+
 type sourceStageResult struct {
 	staged          []UpstreamDNSSourceYAML
 	prepared        []sourcePrepared
@@ -284,7 +297,7 @@ func (m *sourceManager) prepare(ctx context.Context, src UpstreamDNSSourceYAML) 
 	return p, nil
 }
 
-func (m *sourceManager) commit(src *UpstreamDNSSourceYAML, p sourcePrepared) (updated bool, err error) {
+func (m *sourceManager) commit(src *UpstreamDNSSourceYAML, p sourcePrepared) (rec commitRecord, updated bool, err error) {
 	dst := src.path(m.dataDir)
 
 	if p.checksum == p.prevChecksum {
@@ -293,19 +306,42 @@ func (m *sourceManager) commit(src *UpstreamDNSSourceYAML, p sourcePrepared) (up
 			// Cache exists and content is unchanged; skip rewrite.
 			_ = os.Remove(p.tmpPath)
 
-			return false, nil
+			return rec, false, nil
 		}
 
 		if !stderrors.Is(statErr, os.ErrNotExist) {
-			return false, fmt.Errorf("checking source cache: %w", statErr)
+			return rec, false, fmt.Errorf("checking source cache: %w", statErr)
 		}
 
 		// Cache is missing; rebuild it from the prepared temporary file.
 	}
 
+	rec.dst = dst
+
+	_, statErr := os.Stat(dst)
+	switch {
+	case statErr == nil:
+		backup := dst + ".old"
+		// Drop a leftover backup from a previous interrupted update.
+		_ = os.Remove(backup)
+		err = os.Rename(dst, backup)
+		if err != nil {
+			return commitRecord{}, false, fmt.Errorf("backing up source cache: %w", err)
+		}
+		rec.backup = backup
+	case stderrors.Is(statErr, os.ErrNotExist):
+		rec.created = true
+	default:
+		return commitRecord{}, false, fmt.Errorf("checking source cache: %w", statErr)
+	}
+
 	err = os.Rename(p.tmpPath, dst)
 	if err != nil {
-		return false, fmt.Errorf("renaming source cache: %w", err)
+		if rec.backup != "" {
+			_ = os.Rename(rec.backup, dst)
+		}
+
+		return commitRecord{}, false, fmt.Errorf("renaming source cache: %w", err)
 	}
 
 	src.ensureName(p.name)
@@ -313,7 +349,7 @@ func (m *sourceManager) commit(src *UpstreamDNSSourceYAML, p sourcePrepared) (up
 	src.checksum = p.checksum
 	src.LastUpdated = p.lastUpdated
 
-	return true, nil
+	return rec, true, nil
 }
 
 func (m *sourceManager) cleanupPrepared(prepared []sourcePrepared) {
@@ -323,6 +359,66 @@ func (m *sourceManager) cleanupPrepared(prepared []sourcePrepared) {
 		}
 
 		_ = os.Remove(p.tmpPath)
+	}
+}
+
+// rollbackCommitted restores cache files described by records after a failed
+// apply.  records should be processed in reverse order so multi-source commits
+// unwind cleanly.
+func (m *sourceManager) rollbackCommitted(records []commitRecord) {
+	for i := len(records) - 1; i >= 0; i-- {
+		rec := records[i]
+		if rec.dst == "" {
+			continue
+		}
+
+		if rec.created {
+			if rmErr := os.Remove(rec.dst); rmErr != nil && !stderrors.Is(rmErr, os.ErrNotExist) {
+				m.logger.ErrorContext(
+					context.Background(),
+					"rolling back created source cache",
+					"path", rec.dst,
+					slogutil.KeyError, rmErr,
+				)
+			}
+
+			continue
+		}
+
+		if rec.backup == "" {
+			continue
+		}
+
+		// Replace the newly written cache with the pre-commit backup.
+		_ = os.Remove(rec.dst)
+		if mvErr := os.Rename(rec.backup, rec.dst); mvErr != nil {
+			m.logger.ErrorContext(
+				context.Background(),
+				"rolling back source cache backup",
+				"path", rec.dst,
+				"backup", rec.backup,
+				slogutil.KeyError, mvErr,
+			)
+		}
+	}
+}
+
+// cleanupCommitBackups removes temporary .old backups left after a successful
+// commit transaction.
+func (m *sourceManager) cleanupCommitBackups(records []commitRecord) {
+	for _, rec := range records {
+		if rec.backup == "" {
+			continue
+		}
+
+		if rmErr := os.Remove(rec.backup); rmErr != nil && !stderrors.Is(rmErr, os.ErrNotExist) {
+			m.logger.ErrorContext(
+				context.Background(),
+				"removing source cache backup",
+				"path", rec.backup,
+				slogutil.KeyError, rmErr,
+			)
+		}
 	}
 }
 
@@ -376,7 +472,10 @@ func (m *sourceManager) cloneSources() (sources []UpstreamDNSSourceYAML) {
 	return sources
 }
 
-func (m *sourceManager) commitPrepared(staged []UpstreamDNSSourceYAML, prepared []sourcePrepared) (err error) {
+func (m *sourceManager) commitPrepared(
+	staged []UpstreamDNSSourceYAML,
+	prepared []sourcePrepared,
+) (records []commitRecord, err error) {
 	for i := range prepared {
 		if prepared[i].tmpPath == "" {
 			continue
@@ -386,36 +485,39 @@ func (m *sourceManager) commitPrepared(staged []UpstreamDNSSourceYAML, prepared 
 			continue
 		}
 
-		_, err = m.commit(&staged[i], prepared[i])
+		var rec commitRecord
+		rec, _, err = m.commit(&staged[i], prepared[i])
 		if err != nil {
+			m.rollbackCommitted(records)
 			m.cleanupPrepared(prepared[i:])
 
-			return err
+			return nil, err
 		}
 		prepared[i].tmpPath = ""
+		if rec.dst != "" {
+			records = append(records, rec)
+		}
 	}
 
-	return nil
+	return records, nil
 }
 
-// finalizeRemoved deletes cache files of sources that are no longer present.
-func (m *sourceManager) finalizeRemoved(staged []UpstreamDNSSourceYAML) {
-	removed := map[uint64]struct{}{}
-	for _, cur := range m.conf.UpstreamDNSSources {
+// finalizeRemoved deletes cache files of sources that were present in prev but
+// are no longer present in staged.  prev must be the source list from before
+// the update is applied; after a successful reconfigure the live config already
+// matches staged, so the pre-update snapshot is required for cleanup.
+func (m *sourceManager) finalizeRemoved(prev, staged []UpstreamDNSSourceYAML) {
+	for _, cur := range prev {
 		if slices.ContainsFunc(staged, func(src UpstreamDNSSourceYAML) bool { return src.ID == cur.ID }) {
 			continue
 		}
 
-		removed[cur.ID] = struct{}{}
-	}
-
-	for id := range removed {
-		path := (&UpstreamDNSSourceYAML{UpstreamDNSSource: UpstreamDNSSource{ID: id}}).path(m.dataDir)
+		path := (&UpstreamDNSSourceYAML{UpstreamDNSSource: UpstreamDNSSource{ID: cur.ID}}).path(m.dataDir)
 		if rmErr := os.Remove(path); rmErr != nil && !stderrors.Is(rmErr, os.ErrNotExist) {
 			m.logger.ErrorContext(context.Background(), "removing source cache", "path", path, slogutil.KeyError, rmErr)
 		}
 
-		// Also drop any leftover backup files from older versions.
+		// Also drop any leftover backup files from older versions or failed applies.
 		oldPath := path + ".old"
 		if rmErr := os.Remove(oldPath); rmErr != nil && !stderrors.Is(rmErr, os.ErrNotExist) {
 			m.logger.ErrorContext(context.Background(), "removing source cache backup", "path", oldPath, slogutil.KeyError, rmErr)
@@ -772,7 +874,7 @@ func (m *sourceManager) ensureCaches(ctx context.Context) {
 
 		p.prevChecksum = src.checksum
 
-		_, commitErr := m.commit(src, p)
+		_, _, commitErr := m.commit(src, p)
 		if commitErr != nil {
 			_ = os.Remove(p.tmpPath)
 			m.logger.WarnContext(

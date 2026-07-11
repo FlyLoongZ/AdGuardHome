@@ -110,8 +110,17 @@ func applyUpstreamSourceStage(
 		return nil
 	}
 
+	// Keep a stable manager reference: reconfigure recreates upstreamSources,
+	// but rollback/cleanup must still use the manager that owns the cache files.
+	sm := s.upstreamSources
+
+	// Snapshot the pre-update list so cache files for removed sources can still
+	// be deleted after a successful reconfigure replaces upstreamSources.
+	prevSources := sm.cloneSources()
+
 	// Commit caches first so reconfigure always reads the final cache paths.
-	err = s.upstreamSources.commitPrepared(stage.staged, stage.prepared)
+	// Keep rollback records until reconfigure succeeds.
+	records, err := sm.commitPrepared(stage.staged, stage.prepared)
 	if err != nil {
 		return err
 	}
@@ -119,14 +128,22 @@ func applyUpstreamSourceStage(
 	if stage.requiresRestart {
 		err = s.reconfigureWithUpstreamSources(ctx, stage.staged)
 		if err != nil {
+			sm.rollbackCommitted(records)
+
 			return err
 		}
 	}
 
-	s.upstreamSources.finalizeRemoved(stage.staged)
-	s.upstreamSources.conf.UpstreamDNSSources = stage.staged
+	// Prefer the live manager after reconfigure so conf pointers stay in sync.
+	live := s.upstreamSources
+	if live == nil {
+		live = sm
+	}
+	live.finalizeRemoved(prevSources, stage.staged)
+	live.conf.UpstreamDNSSources = stage.staged
 	s.conf.UpstreamDNSSources = stage.staged
 	s.conf.ConfModifier.Apply(ctx)
+	sm.cleanupCommitBackups(records)
 
 	return nil
 }

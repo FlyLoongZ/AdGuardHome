@@ -650,6 +650,139 @@ func TestSourceManager_Prepare_RejectsOversizedSource(t *testing.T) {
 	assert.Contains(t, err.Error(), "maximum size")
 }
 
+func TestSourceManager_CommitRollback(t *testing.T) {
+	tmpDir := t.TempDir()
+	srcPath := filepath.Join(tmpDir, "upstreams.txt")
+	oldContent := "[/example.org/]1.1.1.1\n"
+	newContent := "[/example.org/]9.9.9.9\n"
+	require.NoError(t, os.WriteFile(srcPath, []byte(newContent), 0o644))
+
+	dataDir := filepath.Join(tmpDir, "data")
+	cacheDir := filepath.Join(dataDir, upstreamSourcesCacheDir)
+	require.NoError(t, os.MkdirAll(cacheDir, 0o755))
+
+	src := UpstreamDNSSourceYAML{
+		Enabled: true,
+		URL:     srcPath,
+		Name:    "local",
+		UpstreamDNSSource: UpstreamDNSSource{
+			ID: 1,
+		},
+	}
+	cachePath := src.path(dataDir)
+	require.NoError(t, os.WriteFile(cachePath, []byte(oldContent), 0o644))
+
+	flt, err := filtering.New(&filtering.Config{
+		Logger:          testLogger,
+		DataDir:         dataDir,
+		SafeFSPatterns:  []string{filepath.Join(tmpDir, "*")},
+		BlockedServices: emptyFilteringBlockedServices(),
+	}, nil)
+	require.NoError(t, err)
+
+	sm := newSourceManager(&ServerConfig{
+		Config: Config{
+			UpstreamDNSSources: []UpstreamDNSSourceYAML{src},
+		},
+	}, testLogger, flt)
+
+	ctx := testutil.ContextWithTimeout(t, testTimeout)
+	p, err := sm.prepare(ctx, src)
+	require.NoError(t, err)
+	p.prevChecksum = sm.conf.UpstreamDNSSources[0].checksum
+
+	// Replace an existing cache and ensure rollback restores the previous file.
+	rec, updated, err := sm.commit(&sm.conf.UpstreamDNSSources[0], p)
+	require.NoError(t, err)
+	require.True(t, updated)
+	require.NotEmpty(t, rec.backup)
+	require.False(t, rec.created)
+
+	got, err := os.ReadFile(cachePath)
+	require.NoError(t, err)
+	assert.Equal(t, newContent, string(got))
+
+	sm.rollbackCommitted([]commitRecord{rec})
+	got, err = os.ReadFile(cachePath)
+	require.NoError(t, err)
+	assert.Equal(t, oldContent, string(got))
+	_, err = os.Stat(rec.backup)
+	require.ErrorIs(t, err, os.ErrNotExist)
+
+	// Creating a brand-new cache and rolling it back must remove the file.
+	src.ID = 2
+	src.clear()
+	require.NoError(t, os.WriteFile(srcPath, []byte(newContent), 0o644))
+	p, err = sm.prepare(ctx, src)
+	require.NoError(t, err)
+
+	rec, updated, err = sm.commit(&src, p)
+	require.NoError(t, err)
+	require.True(t, updated)
+	require.True(t, rec.created)
+	require.FileExists(t, rec.dst)
+
+	sm.rollbackCommitted([]commitRecord{rec})
+	_, err = os.Stat(rec.dst)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestSourceManager_CommitPrepared_PartialFailureRollsBack(t *testing.T) {
+	tmpDir := t.TempDir()
+	goodSrcPath := filepath.Join(tmpDir, "good.txt")
+	require.NoError(t, os.WriteFile(goodSrcPath, []byte("[/example.org/]1.1.1.1\n"), 0o644))
+
+	dataDir := filepath.Join(tmpDir, "data")
+	flt, err := filtering.New(&filtering.Config{
+		Logger:          testLogger,
+		DataDir:         dataDir,
+		SafeFSPatterns:  []string{filepath.Join(tmpDir, "*")},
+		BlockedServices: emptyFilteringBlockedServices(),
+	}, nil)
+	require.NoError(t, err)
+
+	sm := newSourceManager(&ServerConfig{}, testLogger, flt)
+	ctx := testutil.ContextWithTimeout(t, testTimeout)
+
+	pGood, err := sm.prepare(ctx, UpstreamDNSSourceYAML{
+		Enabled: true,
+		URL:     goodSrcPath,
+		UpstreamDNSSource: UpstreamDNSSource{
+			ID: 1,
+		},
+	})
+	require.NoError(t, err)
+
+	// Second prepared entry points at a missing temp file so commit fails after
+	// the first source has already been written.
+	missingTmp := filepath.Join(sm.cacheDir(), "missing-src.tmp")
+	staged := []UpstreamDNSSourceYAML{{
+		Enabled: true,
+		URL:     goodSrcPath,
+		UpstreamDNSSource: UpstreamDNSSource{
+			ID: 1,
+		},
+	}, {
+		Enabled: true,
+		URL:     goodSrcPath + ".other",
+		UpstreamDNSSource: UpstreamDNSSource{
+			ID: 2,
+		},
+	}}
+	prepared := []sourcePrepared{
+		pGood,
+		{tmpPath: missingTmp, count: 1, checksum: 1, lastUpdated: time.Now()},
+	}
+
+	records, err := sm.commitPrepared(staged, prepared)
+	require.Error(t, err)
+	assert.Nil(t, records)
+
+	// The first source must not leave an orphan cache file behind.
+	_, err = os.Stat(staged[0].path(dataDir))
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
 func TestSourceManager_CleanupStaleCacheFiles(t *testing.T) {
 	dataDir := t.TempDir()
 	cacheDir := filepath.Join(dataDir, upstreamSourcesCacheDir)
