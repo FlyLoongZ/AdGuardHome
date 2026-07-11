@@ -289,8 +289,9 @@ type ServerConfig struct {
 	// Register an HTTP handler
 	HTTPReg aghhttp.Registrar
 
-	// HTTPClient is the client to use for fetching remote upstream source data.
-	// If nil, [http.DefaultClient] is used.
+	// HTTPClient is retained for compatibility with reconfigure paths that may
+	// copy ServerConfig without reconstructing network clients.  Upstream
+	// source downloads use [filtering.DNSFilter.Reader] and its HTTP client.
 	HTTPClient *http.Client
 
 	// LocalPTRResolvers is a slice of addresses to be used as upstreams for
@@ -324,8 +325,9 @@ type ServerConfig struct {
 	// DataDir is used to store upstream source cache contents.
 	DataDir string
 
-	// SafeFSPatterns are the patterns for matching which local upstream source
-	// files can be added.
+	// SafeFSPatterns is retained for compatibility with callers that still pass
+	// local filesystem allow-lists into ServerConfig.  Upstream source path
+	// checks are enforced by [filtering.DNSFilter.Reader].
 	SafeFSPatterns []string
 }
 

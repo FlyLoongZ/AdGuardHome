@@ -611,6 +611,55 @@ func TestSourceManager_EnsureCaches_FetchesMissing(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestSourceManager_Prepare_RejectsOversizedSource(t *testing.T) {
+	oldMax := maxUpstreamSourceSize
+	maxUpstreamSourceSize = 64
+	t.Cleanup(func() { maxUpstreamSourceSize = oldMax })
+
+	tmpDir := t.TempDir()
+	srcPath := filepath.Join(tmpDir, "huge-upstreams.txt")
+	// Content intentionally exceeds the temporary test limit.
+	require.NoError(t, os.WriteFile(srcPath, []byte("[/example.org/]1.1.1.1\n[/example.net/]9.9.9.9\n[/example.com/]8.8.8.8\n"), 0o644))
+
+	dataDir := filepath.Join(tmpDir, "data")
+	flt, err := filtering.New(&filtering.Config{
+		Logger:          testLogger,
+		DataDir:         dataDir,
+		SafeFSPatterns:  []string{filepath.Join(tmpDir, "*")},
+		BlockedServices: emptyFilteringBlockedServices(),
+	}, nil)
+	require.NoError(t, err)
+
+	sm := newSourceManager(&ServerConfig{DataDir: dataDir}, testLogger, flt)
+	_, err = sm.prepare(testutil.ContextWithTimeout(t, testTimeout), UpstreamDNSSourceYAML{
+		Enabled: true,
+		URL:     srcPath,
+		UpstreamDNSSource: UpstreamDNSSource{
+			ID: 1,
+		},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "maximum size")
+}
+
+func TestSourceManager_CleanupStaleCacheFiles(t *testing.T) {
+	dataDir := t.TempDir()
+	cacheDir := filepath.Join(dataDir, upstreamSourcesCacheDir)
+	require.NoError(t, os.MkdirAll(cacheDir, 0o755))
+
+	oldPath := filepath.Join(cacheDir, "upstream-1.txt.old")
+	tmpPath := filepath.Join(cacheDir, "src-xyz.tmp")
+	require.NoError(t, os.WriteFile(oldPath, []byte("old"), 0o644))
+	require.NoError(t, os.WriteFile(tmpPath, []byte("tmp"), 0o644))
+
+	_ = newSourceManager(&ServerConfig{DataDir: dataDir}, testLogger, nil)
+
+	_, err := os.Stat(oldPath)
+	require.ErrorIs(t, err, os.ErrNotExist)
+	_, err = os.Stat(tmpPath)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
 func TestServerWithProtectionDisabled(t *testing.T) {
 	s := createTestServer(t, &filtering.Config{
 		BlockingMode: filtering.BlockingModeDefault,

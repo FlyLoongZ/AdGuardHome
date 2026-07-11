@@ -490,7 +490,7 @@ func (s *Server) startLocked(ctx context.Context) error {
 // Prepare initializes parameters of s using data from conf.  conf must not be
 // nil.
 func (s *Server) Prepare(ctx context.Context, conf *ServerConfig) (err error) {
-	// 保留已有的 HTTPClient，避免 Reconfigure 时传入的 conf 未设置此字段
+	// Keep the existing HTTPClient when Reconfigure passes a conf without one.
 	if conf.HTTPClient == nil {
 		conf.HTTPClient = s.conf.HTTPClient
 	}

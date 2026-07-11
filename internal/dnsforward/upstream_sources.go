@@ -27,6 +27,13 @@ import (
 const upstreamSourcesCacheDir = "filters"
 const upstreamSourcesCachePrefix = "upstream-"
 
+// maxUpstreamSourceSize is the maximum size of an upstream source list.  It
+// matches the default filtering-rule list limit so large downloads cannot
+// exhaust memory during prepare.
+//
+// Tests may temporarily lower this value.
+var maxUpstreamSourceSize int64 = 64 << 20
+
 // UpstreamDNSSource represents source metadata persisted in YAML.
 type UpstreamDNSSource struct {
 	// ID is automatically assigned when source is added.
@@ -134,6 +141,7 @@ func newSourceManager(conf *ServerConfig, l *slog.Logger, f *filtering.DNSFilter
 	}
 
 	sm.nextID = maxID + 1
+	sm.cleanupStaleCacheFiles()
 
 	return sm
 }
@@ -189,7 +197,9 @@ func (m *sourceManager) prepare(ctx context.Context, src UpstreamDNSSourceYAML) 
 
 	h := xxhash.New()
 	writer := io.MultiWriter(tmpFile, h)
-	tr := io.TeeReader(r, writer)
+	// +1 lets us detect an oversized body after the limited read finishes.
+	lr := &io.LimitedReader{R: r, N: maxUpstreamSourceSize + 1}
+	tr := io.TeeReader(lr, writer)
 
 	var lines []string
 	lineCount := 0
@@ -204,6 +214,9 @@ func (m *sourceManager) prepare(ctx context.Context, src UpstreamDNSSourceYAML) 
 	}
 	if err := scanner.Err(); err != nil {
 		return p, fmt.Errorf("reading source: %w", err)
+	}
+	if lr.N == 0 {
+		return p, fmt.Errorf("upstream source exceeds maximum size of %d bytes", maxUpstreamSourceSize)
 	}
 
 	err = m.validateLines(lines)
@@ -235,7 +248,7 @@ func (m *sourceManager) commit(src *UpstreamDNSSourceYAML, p sourcePrepared) (up
 	if p.checksum == p.prevChecksum {
 		_, statErr := os.Stat(dst)
 		if statErr == nil {
-			// 缓存存在且内容未变 → 跳过写入
+			// Cache exists and content is unchanged; skip rewrite.
 			_ = os.Remove(p.tmpPath)
 
 			return false, nil
@@ -245,8 +258,7 @@ func (m *sourceManager) commit(src *UpstreamDNSSourceYAML, p sourcePrepared) (up
 			return false, fmt.Errorf("checking source cache: %w", statErr)
 		}
 
-		// 缓存文件不存在（ErrNotExist）→ 从 tmpPath 重建
-		// 新源或缓存目录清理后均会进入此路径
+		// Cache is missing; rebuild it from the prepared temporary file.
 	}
 
 	err = os.Rename(p.tmpPath, dst)
@@ -344,7 +356,7 @@ func (m *sourceManager) commitPrepared(staged []UpstreamDNSSourceYAML, prepared 
 	return nil
 }
 
-// finalizeRemoved renames cache files of sources that are no longer present.
+// finalizeRemoved deletes cache files of sources that are no longer present.
 func (m *sourceManager) finalizeRemoved(staged []UpstreamDNSSourceYAML) {
 	removed := map[uint64]struct{}{}
 	for _, cur := range m.conf.UpstreamDNSSources {
@@ -357,8 +369,36 @@ func (m *sourceManager) finalizeRemoved(staged []UpstreamDNSSourceYAML) {
 
 	for id := range removed {
 		path := (&UpstreamDNSSourceYAML{UpstreamDNSSource: UpstreamDNSSource{ID: id}}).path(m.conf.DataDir)
-		if rmErr := os.Rename(path, path+".old"); rmErr != nil && !stderrors.Is(rmErr, os.ErrNotExist) {
-			m.logger.ErrorContext(context.Background(), "renaming source file", "path", path, slogutil.KeyError, rmErr)
+		if rmErr := os.Remove(path); rmErr != nil && !stderrors.Is(rmErr, os.ErrNotExist) {
+			m.logger.ErrorContext(context.Background(), "removing source cache", "path", path, slogutil.KeyError, rmErr)
+		}
+
+		// Also drop any leftover backup files from older versions.
+		oldPath := path + ".old"
+		if rmErr := os.Remove(oldPath); rmErr != nil && !stderrors.Is(rmErr, os.ErrNotExist) {
+			m.logger.ErrorContext(context.Background(), "removing source cache backup", "path", oldPath, slogutil.KeyError, rmErr)
+		}
+	}
+}
+
+// cleanupStaleCacheFiles removes leftover temporary and backup cache files.
+func (m *sourceManager) cleanupStaleCacheFiles() {
+	if m.conf == nil || m.conf.DataDir == "" {
+		return
+	}
+
+	patterns := []string{
+		filepath.Join(m.cacheDir(), upstreamSourcesCachePrefix+"*.txt.old"),
+		filepath.Join(m.cacheDir(), "src-*.tmp"),
+	}
+	for _, pattern := range patterns {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			continue
+		}
+
+		for _, path := range matches {
+			_ = os.Remove(path)
 		}
 	}
 }
@@ -371,8 +411,9 @@ func (m *sourceManager) stageAdd(ctx context.Context, src UpstreamDNSSourceYAML)
 	staged := m.cloneSources()
 	prepared := make([]sourcePrepared, len(staged)+1)
 
+	// Assign an ID only after prepare succeeds so failed adds do not create
+	// permanent ID gaps.
 	src.ID = m.nextID
-	m.nextID++
 
 	p, err := m.prepare(ctx, src)
 	if err != nil {
@@ -380,6 +421,7 @@ func (m *sourceManager) stageAdd(ctx context.Context, src UpstreamDNSSourceYAML)
 
 		return res, fmt.Errorf("preparing source: %w", err)
 	}
+	m.nextID++
 	p.prevChecksum = src.checksum
 
 	src.ensureName(p.name)
