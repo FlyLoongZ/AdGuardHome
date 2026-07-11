@@ -941,6 +941,65 @@ func TestSourceManager_CommitPrepared_PartialFailureRollsBack(t *testing.T) {
 	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
+func TestSourceManager_StageRefreshPrepared_DropsStaleChecksum(t *testing.T) {
+	tmpDir := t.TempDir()
+	srcPath := filepath.Join(tmpDir, "upstreams.txt")
+	oldContent := "[/example.org/]1.1.1.1\n"
+	newContent := "[/example.org/]9.9.9.9\n"
+	require.NoError(t, os.WriteFile(srcPath, []byte(oldContent), 0o644))
+
+	dataDir := filepath.Join(tmpDir, "data")
+	flt, err := filtering.New(&filtering.Config{
+		Logger:          testLogger,
+		DataDir:         dataDir,
+		SafeFSPatterns:  []string{filepath.Join(tmpDir, "*")},
+		BlockedServices: emptyFilteringBlockedServices(),
+	}, nil)
+	require.NoError(t, err)
+
+	src := UpstreamDNSSourceYAML{
+		Enabled: true,
+		URL:     srcPath,
+		Name:    "local",
+		UpstreamDNSSource: UpstreamDNSSource{
+			ID: 1,
+		},
+	}
+	sm := newSourceManager(&ServerConfig{
+		Config: Config{
+			UpstreamDNSSources: []UpstreamDNSSourceYAML{src},
+		},
+	}, testLogger, flt)
+
+	ctx := testutil.ContextWithTimeout(t, testTimeout)
+	pStale, err := sm.prepare(ctx, sm.conf.UpstreamDNSSources[0])
+	require.NoError(t, err)
+	pStale.prevChecksum = sm.conf.UpstreamDNSSources[0].checksum
+
+	// Simulate a concurrent update that replaced the source contents.
+	require.NoError(t, os.WriteFile(srcPath, []byte(newContent), 0o644))
+	pCurrent, err := sm.prepare(ctx, sm.conf.UpstreamDNSSources[0])
+	require.NoError(t, err)
+	pCurrent.prevChecksum = sm.conf.UpstreamDNSSources[0].checksum
+	rec, updated, err := sm.commit(&sm.conf.UpstreamDNSSources[0], pCurrent)
+	require.NoError(t, err)
+	require.True(t, updated)
+	sm.cleanupCommitBackups([]commitRecord{rec})
+
+	currentChecksum := sm.conf.UpstreamDNSSources[0].checksum
+	require.NotEqual(t, pStale.prevChecksum, currentChecksum)
+
+	stage := sm.stageRefreshPrepared(map[uint64]sourcePrepared{
+		1: pStale,
+	}, nil)
+	assert.Equal(t, 0, stage.updated)
+	assert.False(t, stage.requiresRestart)
+	assert.Equal(t, currentChecksum, stage.staged[0].checksum)
+	assert.Empty(t, stage.prepared[0].tmpPath)
+	_, err = os.Stat(pStale.tmpPath)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
 func TestSourceManager_StageSetPrepared_RejectsStaleID(t *testing.T) {
 	tmpDir := t.TempDir()
 	srcPath := filepath.Join(tmpDir, "upstreams.txt")

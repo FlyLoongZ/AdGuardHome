@@ -784,7 +784,17 @@ func (m *sourceManager) stageRefreshPrepared(
 			continue
 		}
 
-		p.prevChecksum = src.checksum
+		// The download was based on a lock-free snapshot.  If another update
+		// already changed this source, drop the stale prepare instead of
+		// overwriting the newer content.
+		if p.prevChecksum != src.checksum {
+			if p.tmpPath != "" {
+				_ = os.Remove(p.tmpPath)
+			}
+
+			continue
+		}
+
 		refreshed++
 		wasUpdated := p.checksum != src.checksum
 

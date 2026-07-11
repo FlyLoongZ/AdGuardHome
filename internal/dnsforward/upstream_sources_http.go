@@ -443,6 +443,9 @@ func (s *Server) refreshUpstreamSources(ctx context.Context, force bool) (stage 
 			continue
 		}
 
+		// Remember the snapshot checksum so stageRefreshPrepared can drop this
+		// result if a concurrent update already replaced the source.
+		p.prevChecksum = src.checksum
 		preparedByID[src.ID] = p
 		refreshed++
 	}
