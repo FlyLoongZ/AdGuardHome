@@ -303,8 +303,22 @@ func (m *sourceManager) commit(src *UpstreamDNSSourceYAML, p sourcePrepared) (re
 	if p.checksum == p.prevChecksum {
 		_, statErr := os.Stat(dst)
 		if statErr == nil {
-			// Cache exists and content is unchanged; skip rewrite.
+			// Cache exists and content is unchanged; skip rewrite but advance
+			// mtime so loadMetadata restores the same LastUpdated after restart.
 			_ = os.Remove(p.tmpPath)
+			if chtErr := os.Chtimes(dst, p.lastUpdated, p.lastUpdated); chtErr != nil {
+				m.logger.ErrorContext(
+					context.Background(),
+					"updating source cache mtime",
+					"path", dst,
+					slogutil.KeyError, chtErr,
+				)
+			}
+
+			src.ensureName(p.name)
+			src.RulesCount = p.count
+			src.checksum = p.checksum
+			src.LastUpdated = p.lastUpdated
 
 			return rec, false, nil
 		}

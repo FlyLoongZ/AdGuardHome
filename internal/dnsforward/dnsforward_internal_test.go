@@ -650,6 +650,73 @@ func TestSourceManager_Prepare_RejectsOversizedSource(t *testing.T) {
 	assert.Contains(t, err.Error(), "maximum size")
 }
 
+func TestSourceManager_CommitUnchanged_AdvancesMtime(t *testing.T) {
+	tmpDir := t.TempDir()
+	srcPath := filepath.Join(tmpDir, "upstreams.txt")
+	content := "[/example.org/]1.1.1.1\n"
+	require.NoError(t, os.WriteFile(srcPath, []byte(content), 0o644))
+
+	dataDir := filepath.Join(tmpDir, "data")
+	cacheDir := filepath.Join(dataDir, upstreamSourcesCacheDir)
+	require.NoError(t, os.MkdirAll(cacheDir, 0o755))
+
+	src := UpstreamDNSSourceYAML{
+		Enabled: true,
+		URL:     srcPath,
+		Name:    "local",
+		UpstreamDNSSource: UpstreamDNSSource{
+			ID: 1,
+		},
+	}
+	cachePath := src.path(dataDir)
+	require.NoError(t, os.WriteFile(cachePath, []byte(content), 0o644))
+	oldMtime := time.Now().Add(-2 * time.Hour).Round(time.Second)
+	require.NoError(t, os.Chtimes(cachePath, oldMtime, oldMtime))
+
+	flt, err := filtering.New(&filtering.Config{
+		Logger:          testLogger,
+		DataDir:         dataDir,
+		SafeFSPatterns:  []string{filepath.Join(tmpDir, "*")},
+		BlockedServices: emptyFilteringBlockedServices(),
+	}, nil)
+	require.NoError(t, err)
+
+	sm := newSourceManager(&ServerConfig{
+		Config: Config{
+			UpstreamDNSSources: []UpstreamDNSSourceYAML{src},
+		},
+	}, testLogger, flt)
+	require.Equal(t, oldMtime.Unix(), sm.conf.UpstreamDNSSources[0].LastUpdated.Unix())
+
+	ctx := testutil.ContextWithTimeout(t, testTimeout)
+	p, err := sm.prepare(ctx, sm.conf.UpstreamDNSSources[0])
+	require.NoError(t, err)
+	p.prevChecksum = sm.conf.UpstreamDNSSources[0].checksum
+	// Ensure lastUpdated is distinctly newer than the old mtime.
+	p.lastUpdated = time.Now().Round(time.Second)
+
+	rec, updated, err := sm.commit(&sm.conf.UpstreamDNSSources[0], p)
+	require.NoError(t, err)
+	assert.False(t, updated)
+	assert.Empty(t, rec.dst)
+	assert.Equal(t, p.lastUpdated.Unix(), sm.conf.UpstreamDNSSources[0].LastUpdated.Unix())
+
+	st, err := os.Stat(cachePath)
+	require.NoError(t, err)
+	assert.Equal(t, p.lastUpdated.Unix(), st.ModTime().Unix())
+
+	// Restart-style metadata load must see the advanced mtime.
+	loaded := UpstreamDNSSourceYAML{
+		Enabled: true,
+		URL:     srcPath,
+		UpstreamDNSSource: UpstreamDNSSource{
+			ID: 1,
+		},
+	}
+	require.NoError(t, sm.loadMetadata(&loaded))
+	assert.Equal(t, p.lastUpdated.Unix(), loaded.LastUpdated.Unix())
+}
+
 func TestSourceManager_CommitRollback(t *testing.T) {
 	tmpDir := t.TempDir()
 	srcPath := filepath.Join(tmpDir, "upstreams.txt")
