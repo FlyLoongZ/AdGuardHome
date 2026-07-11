@@ -48,7 +48,7 @@ const Sources = ({ standalone = false }: SourcesProps) => {
 
     const isEdit = Boolean(selectedSource);
     const isDnsConfigPending = !loaded || processingGetConfig;
-    const isLegacyFileMode = isDnsConfigPending || Boolean(upstreamDnsFile);
+    const isLegacyFileMode = Boolean(upstreamDnsFile);
 
     useEffect(() => {
         dispatch(getUpstreamDnsSources());
@@ -100,8 +100,15 @@ const Sources = ({ standalone = false }: SourcesProps) => {
         dispatch(addUpstreamDnsSource(values));
     };
 
-    const loading = processing || processingAdd || processingRemove || processingSet || processingRefresh;
+    const loading =
+        processing ||
+        processingAdd ||
+        processingRemove ||
+        processingSet ||
+        processingRefresh ||
+        isDnsConfigPending;
     const modalProcessing = processingAdd || processingSet;
+    const actionsDisabled = isDnsConfigPending || isLegacyFileMode;
 
     const content = (
         <>
@@ -116,7 +123,7 @@ const Sources = ({ standalone = false }: SourcesProps) => {
                 loading={loading}
                 processingSet={processingSet}
                 processingRemove={processingRemove}
-                disabledByFile={isLegacyFileMode}
+                disabledByFile={actionsDisabled}
                 onToggle={handleToggle}
                 onEdit={handleOpenEdit}
                 onDelete={handleDelete}
@@ -127,7 +134,7 @@ const Sources = ({ standalone = false }: SourcesProps) => {
                     className="btn btn-success btn-standard mr-2 btn-large mb-2"
                     type="button"
                     onClick={handleOpenNew}
-                    disabled={isLegacyFileMode || processingAdd || processingSet}>
+                    disabled={actionsDisabled || processingAdd || processingSet}>
                     {t('dns_routing_add')}
                 </button>
 
@@ -135,7 +142,7 @@ const Sources = ({ standalone = false }: SourcesProps) => {
                     className="btn btn-primary btn-standard mb-2"
                     type="button"
                     onClick={handleRefresh}
-                    disabled={isLegacyFileMode || processingRefresh}>
+                    disabled={actionsDisabled || processingRefresh}>
                     {t('check_updates_btn')}
                 </button>
             </div>
