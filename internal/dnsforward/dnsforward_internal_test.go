@@ -81,6 +81,12 @@ type clientsContainer struct {
 		cliAddr netip.Addr,
 	) (conf *proxy.CustomUpstreamConfig)
 
+	OnHasCustomDomainSpecificUpstream func(
+		clientID string,
+		cliAddr netip.Addr,
+		fqdn string,
+	) (ok bool)
+
 	OnUpdateCommonUpstreamConfig func(conf *client.CommonUpstreamConfig)
 
 	OnClearUpstreamCache func()
@@ -93,6 +99,20 @@ func (c *clientsContainer) CustomUpstreamConfig(
 	cliAddr netip.Addr,
 ) (conf *proxy.CustomUpstreamConfig) {
 	return c.OnCustomUpstreamConfig(clientID, cliAddr)
+}
+
+// HasCustomDomainSpecificUpstream implements the [ClientsContainer] interface
+// for *clientsContainer.
+func (c *clientsContainer) HasCustomDomainSpecificUpstream(
+	clientID string,
+	cliAddr netip.Addr,
+	fqdn string,
+) (ok bool) {
+	if c.OnHasCustomDomainSpecificUpstream == nil {
+		return false
+	}
+
+	return c.OnHasCustomDomainSpecificUpstream(clientID, cliAddr, fqdn)
 }
 
 // UpdateCommonUpstreamConfig implements the [ClientsContainer] interface for
@@ -163,7 +183,7 @@ func createTestServer(
 		filterConf.ApplyClientFiltering = applyEmptyClientFiltering
 	}
 
-	// Upstream source caches live under filtering.DataDir/filters, so tests that
+	// Upstream source caches live under filtering.DataDir/upstream_sources, so tests that
 	// use local source paths must configure SafeFSPatterns on the filter.
 	if filterConf.SafeFSPatterns == nil {
 		filterConf.SafeFSPatterns = []string{filepath.Join(tb.TempDir(), "*")}
@@ -579,6 +599,43 @@ func TestNewSourceManager_LoadsMetadataFromCache(t *testing.T) {
 	assert.NotZero(t, conf.UpstreamDNSSources[0].checksum)
 }
 
+func TestNewSourceManager_MigratesLegacyCache(t *testing.T) {
+	dataDir := t.TempDir()
+	legacyDir := filepath.Join(dataDir, legacyUpstreamSourcesCacheDir)
+	require.NoError(t, os.MkdirAll(legacyDir, 0o755))
+
+	legacyPath := filepath.Join(legacyDir, "1.txt")
+	content := "[/example.org/]1.1.1.1\n[/example.net/]9.9.9.9\n"
+	require.NoError(t, os.WriteFile(legacyPath, []byte(content), 0o644))
+
+	flt, err := filtering.New(&filtering.Config{
+		Logger:          testLogger,
+		DataDir:         dataDir,
+		BlockedServices: emptyFilteringBlockedServices(),
+	}, nil)
+	require.NoError(t, err)
+
+	conf := &ServerConfig{
+		Config: Config{
+			UpstreamDNSSources: []UpstreamDNSSourceYAML{{
+				Enabled: true,
+				URL:     "https://example.test/source.txt",
+				UpstreamDNSSource: UpstreamDNSSource{ID: 1},
+			}},
+		},
+	}
+
+	_ = newSourceManager(conf, testLogger, flt)
+
+	newPath := conf.UpstreamDNSSources[0].path(dataDir)
+	got, err := os.ReadFile(newPath)
+	require.NoError(t, err)
+	assert.Equal(t, content, string(got))
+	_, err = os.Stat(legacyPath)
+	require.ErrorIs(t, err, os.ErrNotExist)
+	require.Equal(t, 2, conf.UpstreamDNSSources[0].RulesCount)
+}
+
 func TestSourceManager_EnsureCaches_FetchesMissing(t *testing.T) {
 	tmpDir := t.TempDir()
 	srcPath := filepath.Join(tmpDir, "upstreams.txt")
@@ -615,8 +672,29 @@ func TestSourceManager_EnsureCaches_FetchesMissing(t *testing.T) {
 
 	require.Equal(t, 2, conf.UpstreamDNSSources[0].RulesCount)
 	assert.False(t, conf.UpstreamDNSSources[0].LastUpdated.IsZero())
+	assert.Empty(t, conf.UpstreamDNSSources[0].LastError)
 	_, err = os.Stat(conf.UpstreamDNSSources[0].path(dataDir))
 	require.NoError(t, err)
+}
+
+func TestLoadUpstreams_MissingCacheSetsLastError(t *testing.T) {
+	dataDir := t.TempDir()
+	conf := &ServerConfig{
+		Config: Config{
+			UpstreamDNS: []string{"8.8.8.8"},
+			UpstreamDNSSources: []UpstreamDNSSourceYAML{{
+				Enabled: true,
+				URL:     "https://example.test/missing.txt",
+				UpstreamDNSSource: UpstreamDNSSource{ID: 7},
+			}},
+		},
+	}
+
+	ctx := testutil.ContextWithTimeout(t, testTimeout)
+	upstreams, err := conf.loadUpstreams(ctx, testLogger, dataDir)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"8.8.8.8"}, upstreams)
+	require.Contains(t, conf.UpstreamDNSSources[0].LastError, "cache does not exist")
 }
 
 func TestSourceManager_Prepare_RejectsOversizedSource(t *testing.T) {
@@ -1070,10 +1148,8 @@ func TestSourceManager_CleanupStaleCacheFiles(t *testing.T) {
 	cacheDir := filepath.Join(dataDir, upstreamSourcesCacheDir)
 	require.NoError(t, os.MkdirAll(cacheDir, 0o755))
 
-	legacyOldPath := filepath.Join(cacheDir, "upstream-1.txt.old")
 	activeBackup := filepath.Join(cacheDir, "1.txt.old")
 	tmpPath := filepath.Join(cacheDir, "src-xyz.tmp")
-	require.NoError(t, os.WriteFile(legacyOldPath, []byte("old"), 0o644))
 	require.NoError(t, os.WriteFile(activeBackup, []byte("backup"), 0o644))
 	require.NoError(t, os.WriteFile(tmpPath, []byte("tmp"), 0o644))
 
@@ -1085,8 +1161,6 @@ func TestSourceManager_CleanupStaleCacheFiles(t *testing.T) {
 	require.NoError(t, err)
 	_ = newSourceManager(&ServerConfig{}, testLogger, flt)
 
-	_, err = os.Stat(legacyOldPath)
-	require.ErrorIs(t, err, os.ErrNotExist)
 	// Active commit backups must survive manager recreation so rollback can
 	// still restore them after a failed reconfigure.
 	require.FileExists(t, activeBackup)

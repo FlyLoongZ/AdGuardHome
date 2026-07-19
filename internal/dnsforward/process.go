@@ -452,12 +452,14 @@ func (s *Server) processUpstream(
 	if pctx.Res != nil {
 		// The response has already been set.
 		return resultCodeSuccess
-	} else if dctx.isDHCPHost {
-		// A DHCP client hostname query that hasn't been handled or filtered.
-		// Respond with an NXDOMAIN.
-		//
-		// TODO(a.garipov): Route such queries to a custom upstream for the
-		// local domain name if there is one.
+	}
+
+	s.setCustomUpstream(ctx, l, pctx, dctx.clientID)
+
+	if dctx.isDHCPHost && !s.canRouteDHCPHost(req.Question[0].Name, pctx) {
+		// A DHCP client hostname query that hasn't been handled or filtered
+		// and has no domain-specific upstream to answer it.  Respond with an
+		// NXDOMAIN.
 		name := req.Question[0].Name
 		l.DebugContext(
 			ctx,
@@ -468,8 +470,6 @@ func (s *Server) processUpstream(
 
 		return resultCodeFinish
 	}
-
-	s.setCustomUpstream(ctx, l, pctx, dctx.clientID)
 
 	// Process the request further since it wasn't filtered.
 	prx := s.proxy()
@@ -535,6 +535,24 @@ func (s *Server) setCustomUpstream(
 
 		pctx.CustomUpstreamConfig = upsConf
 	}
+}
+
+// canRouteDHCPHost returns true if an unresolved DHCP local-domain request can
+// still be answered through client-specific or domain-specific upstreams.
+//
+// When a client custom upstream config is already attached by setCustomUpstream,
+// always allow routing and let dnsproxy fall through from custom defaults or
+// domain rules to the global upstream set as needed.  Otherwise only route when
+// the global upstream configuration has a domain-specific rule for fqdn.
+func (s *Server) canRouteDHCPHost(fqdn string, pctx *proxy.DNSContext) (ok bool) {
+	if pctx.CustomUpstreamConfig != nil {
+		return true
+	}
+
+	s.serverLock.RLock()
+	defer s.serverLock.RUnlock()
+
+	return hasDomainSpecificUpstream(s.conf.UpstreamConfig, fqdn)
 }
 
 // Apply filtering logic after we have received response from upstream servers.

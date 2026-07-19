@@ -23,14 +23,16 @@ type upstreamSourceJSON struct {
 	Enabled     bool   `json:"enabled"`
 	RulesCount  uint64 `json:"rules_count"`
 	LastUpdated string `json:"last_updated,omitempty"`
+	LastError   string `json:"last_error,omitempty"`
 }
 
 func sourceToJSON(src UpstreamDNSSourceYAML) (sj upstreamSourceJSON) {
 	sj = upstreamSourceJSON{
-		ID:      src.ID,
-		URL:     src.URL,
-		Name:    src.Name,
-		Enabled: src.Enabled,
+		ID:        src.ID,
+		URL:       src.URL,
+		Name:      src.Name,
+		Enabled:   src.Enabled,
+		LastError: src.LastError,
 	}
 
 	if src.RulesCount > 0 {
@@ -151,9 +153,16 @@ func applyUpstreamSourceStage(
 		live = sm
 	}
 	live.finalizeRemoved(prevSources, stage.staged)
+
+	// Protect s.conf readers such as WriteDiskConfig/getDNSConfig.  Keep the
+	// existing lock order: upstreamSourcesMu (held by caller) then serverLock.
+	s.serverLock.Lock()
 	live.conf.UpstreamDNSSources = stage.staged
 	s.conf.UpstreamDNSSources = stage.staged
-	s.conf.ConfModifier.Apply(ctx)
+	confModifier := s.conf.ConfModifier
+	s.serverLock.Unlock()
+
+	confModifier.Apply(ctx)
 	sm.cleanupCommitBackups(records)
 
 	return nil
@@ -429,6 +438,9 @@ func (s *Server) refreshUpstreamSources(ctx context.Context, force bool) (stage 
 
 	preparedByID := map[uint64]sourcePrepared{}
 	warnings := []error{}
+	// failedByID records per-source prepare failures so they can be written
+	// back to LastError under the write lock.
+	failedByID := map[uint64]string{}
 	refreshed := 0
 
 	for _, src := range snapshot {
@@ -438,7 +450,9 @@ func (s *Server) refreshUpstreamSources(ctx context.Context, force bool) (stage 
 
 		p, prepErr := s.upstreamSources.prepare(ctx, src)
 		if prepErr != nil {
-			warnings = append(warnings, fmt.Errorf("preparing source %q: %w", src.URL, prepErr))
+			warn := fmt.Errorf("preparing source %q: %w", src.URL, prepErr)
+			warnings = append(warnings, warn)
+			failedByID[src.ID] = prepErr.Error()
 
 			continue
 		}
@@ -448,6 +462,18 @@ func (s *Server) refreshUpstreamSources(ctx context.Context, force bool) (stage 
 		p.prevChecksum = src.checksum
 		preparedByID[src.ID] = p
 		refreshed++
+	}
+
+	s.upstreamSourcesMu.Lock()
+	defer s.upstreamSourcesMu.Unlock()
+
+	// Persist prepare failures on the live source list even when no successful
+	// prepare remains to apply.
+	for i := range s.conf.UpstreamDNSSources {
+		src := &s.conf.UpstreamDNSSources[i]
+		if msg, ok := failedByID[src.ID]; ok {
+			src.LastError = msg
+		}
 	}
 
 	if refreshed == 0 {
@@ -463,9 +489,6 @@ func (s *Server) refreshUpstreamSources(ctx context.Context, force bool) (stage 
 
 		return stage, nil
 	}
-
-	s.upstreamSourcesMu.Lock()
-	defer s.upstreamSourcesMu.Unlock()
 
 	stage = s.upstreamSources.stageRefreshPrepared(preparedByID, warnings)
 	err = applyUpstreamSourceStage(s, ctx, stage)

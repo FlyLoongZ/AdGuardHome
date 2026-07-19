@@ -1292,6 +1292,104 @@ func TestStorage_CustomUpstreamConfig(t *testing.T) {
 	})
 }
 
+func TestStorage_CustomUpstreamConfig_StaleSnapshotDiscarded(t *testing.T) {
+	date := time.Now()
+	clock := &faketime.Clock{
+		OnNow: func() (now time.Time) {
+			date = date.Add(time.Second)
+
+			return date
+		},
+	}
+
+	ctx := testutil.ContextWithTimeout(t, testTimeout)
+	s, err := client.NewStorage(ctx, &client.StorageConfig{
+		BaseLogger: testLogger,
+		Logger:     testLogger,
+		Clock:      clock,
+		DHCP:       client.EmptyDHCP{},
+	})
+	require.NoError(t, err)
+	testutil.CleanupAndRequireSuccess(t, func() (err error) {
+		return s.Shutdown(testutil.ContextWithTimeout(t, testTimeout))
+	})
+
+	s.UpdateCommonUpstreamConfig(&client.CommonUpstreamConfig{
+		UpstreamTimeout: time.Second,
+	})
+
+	const clientID = "stale_snapshot_client"
+	uid := client.MustNewUID()
+	err = s.Add(ctx, &client.Persistent{
+		Name:      "client",
+		ClientIDs: []client.ClientID{clientID},
+		UID:       uid,
+		Upstreams: []string{"[/lan/]1.1.1.1"},
+	})
+	require.NoError(t, err)
+
+	// Concurrent rebuild + update: the stale build must not pin the old
+	// upstream list after the client configuration changes.
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		_ = s.CustomUpstreamConfig(clientID, netip.Addr{})
+	}()
+
+	err = s.Update(ctx, "client", &client.Persistent{
+		Name:      "client",
+		ClientIDs: []client.ClientID{clientID},
+		UID:       uid,
+		Upstreams: []string{"[/lan/]9.9.9.9"},
+	})
+	require.NoError(t, err)
+	wg.Wait()
+
+	// Force a rebuild if a stale result was incorrectly marked current.
+	s.UpdateCommonUpstreamConfig(&client.CommonUpstreamConfig{
+		UpstreamTimeout: 2 * time.Second,
+	})
+
+	conf := s.CustomUpstreamConfig(clientID, netip.Addr{})
+	require.NotNil(t, conf)
+
+	assert.True(t, s.HasCustomDomainSpecificUpstream(clientID, netip.Addr{}, "pc.lan."))
+	assert.False(t, s.HasCustomDomainSpecificUpstream(clientID, netip.Addr{}, "example.org."))
+}
+
+func TestStorage_HasCustomDomainSpecificUpstream(t *testing.T) {
+	ctx := testutil.ContextWithTimeout(t, testTimeout)
+	s, err := client.NewStorage(ctx, &client.StorageConfig{
+		BaseLogger: testLogger,
+		Logger:     testLogger,
+		Clock:      timeutil.SystemClock{},
+		DHCP:       client.EmptyDHCP{},
+	})
+	require.NoError(t, err)
+	testutil.CleanupAndRequireSuccess(t, func() (err error) {
+		return s.Shutdown(testutil.ContextWithTimeout(t, testTimeout))
+	})
+
+	s.UpdateCommonUpstreamConfig(&client.CommonUpstreamConfig{
+		UpstreamTimeout: time.Second,
+	})
+
+	const clientID = "domain_specific_client"
+	err = s.Add(ctx, &client.Persistent{
+		Name:      "client",
+		ClientIDs: []client.ClientID{clientID},
+		UID:       client.MustNewUID(),
+		Upstreams: []string{"[/lan/]1.1.1.1", "8.8.8.8"},
+	})
+	require.NoError(t, err)
+
+	assert.True(t, s.HasCustomDomainSpecificUpstream(clientID, netip.Addr{}, "pc.lan."))
+	assert.False(t, s.HasCustomDomainSpecificUpstream(clientID, netip.Addr{}, "example.org."))
+	assert.False(t, s.HasCustomDomainSpecificUpstream("missing", netip.Addr{}, "pc.lan."))
+}
+
 func BenchmarkFindParams_Set(b *testing.B) {
 	const (
 		testIPStr    = "192.0.2.1"

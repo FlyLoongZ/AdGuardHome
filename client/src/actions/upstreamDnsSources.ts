@@ -3,7 +3,6 @@ import i18next from 'i18next';
 
 import apiClient from '../api/Api';
 import { addErrorToast, addSuccessToast } from './toasts';
-import { normalizeFilters } from '../helpers/helpers';
 
 export const getUpstreamDnsSourcesRequest = createAction('GET_UPSTREAM_DNS_SOURCES_REQUEST');
 export const getUpstreamDnsSourcesFailure = createAction('GET_UPSTREAM_DNS_SOURCES_FAILURE');
@@ -34,13 +33,37 @@ type UpstreamDnsSource = {
     enabled: boolean;
     rulesCount: number;
     lastUpdated: string;
+    lastError?: string;
 };
+
+const normalizeUpstreamDnsSources = (sources: any[] = []) =>
+    sources.map((source) => {
+        const {
+            id,
+            url,
+            enabled,
+            last_updated: lastUpdated,
+            last_error: lastError = '',
+            name = 'Default name',
+            rules_count: rulesCount = 0,
+        } = source;
+
+        return {
+            id,
+            url,
+            enabled,
+            lastUpdated,
+            lastError,
+            name,
+            rulesCount,
+        };
+    });
 
 const normalizeStatus = (status: any) => {
     const { sources = [] } = status;
 
     return {
-        sources: normalizeFilters(sources),
+        sources: normalizeUpstreamDnsSources(sources),
     };
 };
 

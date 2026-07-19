@@ -1971,6 +1971,12 @@
         'last_updated':
           'type': 'string'
           'format': 'date-time'
+        'last_error':
+          'type': 'string'
+          'description': >
+            Last non-fatal load or refresh error for this source, if any.
+            Present when an enabled source failed to download or its cache is
+            missing and rules were skipped.
     'UpstreamDnsSourcesStatus':
       'type': 'object'
       'description': '/upstream_dns_sources/status response data'

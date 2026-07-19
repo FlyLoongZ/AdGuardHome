@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
-	"sync"
 	"time"
 
 	"github.com/AdguardTeam/AdGuardHome/internal/aghnet"
@@ -31,13 +30,13 @@ type CommonUpstreamConfig struct {
 // timestamp of the latest configuration update.
 type customUpstreamConfig struct {
 	// proxyConf is the constructed upstream configuration for the [proxy],
-	// derived from the fields below.  It is initialized on demand with
-	// [newCustomUpstreamConfig].
+	// derived from the fields below.  It is initialized on demand.
 	proxyConf *proxy.CustomUpstreamConfig
 
-	// commonConfUpdate is the timestamp of the latest configuration update,
-	// used to check against [upstreamManager.confUpdate] to determine if the
-	// configuration is up to date.
+	// commonConfUpdate is the timestamp of the common configuration that
+	// proxyConf was built with.  It is compared against
+	// [upstreamManager.confUpdate] to determine if the configuration is up to
+	// date.
 	commonConfUpdate time.Time
 
 	// upstreams is the cached list of custom upstream DNS servers used for the
@@ -55,9 +54,10 @@ type customUpstreamConfig struct {
 	// isChanged indicates whether the proxyConf needs to be updated.
 	isChanged bool
 
-	// createMu prevents duplicate proxyConf creation when multiple goroutines
-	// concurrently try to build the upstream config for the same client.
-	createMu sync.Mutex
+	// hasSpecificUpstream reports whether the configuration has a
+	// domain-specific upstream for a fully-qualified domain name.  It is set
+	// together with proxyConf.
+	hasSpecificUpstream func(fqdn string) (ok bool)
 }
 
 // upstreamManager stores and updates custom client upstream configurations.
@@ -104,8 +104,8 @@ func (m *upstreamManager) updateCommonUpstreamConfig(conf *CommonUpstreamConfig)
 
 // updateCustomUpstreamConfig updates the stored custom client upstream
 // configuration associated with the persistent client.  It also sets
-// [customUpstreamConfig.isChanged] to true so [customUpstreamConfig.proxyConf]
-// can be updated later in [upstreamManager.customUpstreamConfig].
+// [customUpstreamConfig.isChanged] to true so the proxy configuration can be
+// rebuilt on the next request.
 func (m *upstreamManager) updateCustomUpstreamConfig(c *Persistent) {
 	cliConf, ok := m.uidToCustomConf[c.UID]
 	if !ok {
@@ -123,75 +123,42 @@ func (m *upstreamManager) updateCustomUpstreamConfig(c *Persistent) {
 	cliConf.isChanged = true
 }
 
-// customUpstreamConfig returns the custom client upstream configuration.
-func (m *upstreamManager) customUpstreamConfig(
-	uid UID,
-	clientName string,
-) (proxyConf *proxy.CustomUpstreamConfig) {
-	cliConf, ok := m.uidToCustomConf[uid]
-	if !ok {
-		// TODO(s.chzhen):  Consider panic.
-		m.logger.Error("no associated custom client upstream config")
-
-		return nil
-	}
-
-	if !m.isConfigChanged(cliConf) {
-		return cliConf.proxyConf
-	}
-
-	if cliConf.proxyConf != nil {
-		err := cliConf.proxyConf.Close()
-		if err != nil {
-			// TODO(s.chzhen):  Pass context.
-			m.logger.Debug("closing custom upstream config", slogutil.KeyError, err)
-		}
-	}
-
-	cliLogger := aghslog.NewForUpstream(m.baseLogger, aghslog.UpstreamTypeCustom).With(
-		aghslog.KeyClientName,
-		clientName,
-	)
-	proxyConf = newCustomUpstreamConfig(cliConf, m.commonConf, cliLogger)
-	cliConf.proxyConf = proxyConf
-	cliConf.commonConfUpdate = m.confUpdate
-	cliConf.isChanged = false
-
-	return proxyConf
-}
-
 // isConfigChanged returns true if the update is necessary for the custom client
 // upstream configuration.
 func (m *upstreamManager) isConfigChanged(cliConf *customUpstreamConfig) (ok bool) {
 	return !m.confUpdate.Equal(cliConf.commonConfUpdate) || cliConf.isChanged
 }
 
-// buildCustomUpstreamConfig creates or returns the cached custom client
-// upstream configuration.  Unlike [upstreamManager.customUpstreamConfig], this
-// method may be safely called without holding [Storage.mu] as it uses
-// per-client [sync.Mutex] to prevent duplicate creation.  All parameters except
-// cliConf and clientName must be snapshots taken under [Storage.mu].
-func (m *upstreamManager) buildCustomUpstreamConfig(
+// matchesBuildSnapshot reports whether cliConf still matches the snapshot used
+// to build a custom upstream configuration.  confUpdate is the common-config
+// timestamp from the same snapshot.
+func matchesBuildSnapshot(
 	cliConf *customUpstreamConfig,
+	upstreams []string,
+	cacheSize uint32,
+	cacheEnabled bool,
+	confUpdate time.Time,
+	currentCommonUpdate time.Time,
+) (ok bool) {
+	return confUpdate.Equal(currentCommonUpdate) &&
+		cliConf.upstreamsCacheSize == cacheSize &&
+		cliConf.upstreamsCacheEnabled == cacheEnabled &&
+		slices.Equal(cliConf.upstreams, upstreams)
+}
+
+// buildCustomUpstreamConfig creates a custom client upstream configuration from
+// the provided snapshot.  It does not mutate cliConf; the caller must store the
+// result under [Storage.mu] only when the snapshot is still current.
+func (m *upstreamManager) buildCustomUpstreamConfig(
 	clientName string,
 	upstreams []string,
 	cacheSize uint32,
 	cacheEnabled bool,
 	commonConf CommonUpstreamConfig,
-	confUpdate time.Time,
-) (proxyConf *proxy.CustomUpstreamConfig) {
-	cliConf.createMu.Lock()
-	defer cliConf.createMu.Unlock()
-
-	// Double-check under per-client lock: another goroutine may have
-	// updated the config while we were waiting.
-	if !cliConf.isChanged && confUpdate.Equal(cliConf.commonConfUpdate) {
-		return cliConf.proxyConf
-	}
-
+) (proxyConf *proxy.CustomUpstreamConfig, match func(fqdn string) (ok bool)) {
 	upstreams = stringutil.FilterOut(upstreams, aghnet.IsCommentOrEmpty)
 	if len(upstreams) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	cliLogger := aghslog.NewForUpstream(m.baseLogger, aghslog.UpstreamTypeCustom).With(
@@ -220,7 +187,7 @@ func (m *upstreamManager) buildCustomUpstreamConfig(
 		cacheEnabled,
 		int(cacheSize),
 		commonConf.EDNSClientSubnetEnabled,
-	)
+	), newSpecificUpstreamMatcher(upsConf)
 }
 
 // clearUpstreamCache clears the upstream cache for each stored custom client
@@ -263,41 +230,4 @@ func (m *upstreamManager) close() (err error) {
 	}
 
 	return errors.Join(errs...)
-}
-
-// newCustomUpstreamConfig returns the new properly initialized custom proxy
-// upstream configuration for the client.  cliConf, conf, and cliLogger must not
-// be nil.
-func newCustomUpstreamConfig(
-	cliConf *customUpstreamConfig,
-	conf *CommonUpstreamConfig,
-	cliLogger *slog.Logger,
-) (proxyConf *proxy.CustomUpstreamConfig) {
-	upstreams := stringutil.FilterOut(cliConf.upstreams, aghnet.IsCommentOrEmpty)
-	if len(upstreams) == 0 {
-		return nil
-	}
-
-	upsConf, err := proxy.ParseUpstreamsConfig(
-		upstreams,
-		&upstream.Options{
-			Logger:       cliLogger,
-			Bootstrap:    conf.Bootstrap,
-			Timeout:      conf.UpstreamTimeout,
-			HTTPVersions: aghnet.UpstreamHTTPVersions(conf.UseHTTP3Upstreams),
-			PreferIPv6:   conf.BootstrapPreferIPv6,
-		},
-	)
-	if err != nil {
-		// Should not happen because upstreams are already validated.  See
-		// [Persistent.validate].
-		panic(fmt.Errorf("creating custom upstream config: %w", err))
-	}
-
-	return proxy.NewCustomUpstreamConfig(
-		upsConf,
-		cliConf.upstreamsCacheEnabled,
-		int(cliConf.upstreamsCacheSize),
-		conf.EDNSClientSubnetEnabled,
-	)
 }

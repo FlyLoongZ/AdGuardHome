@@ -731,76 +731,141 @@ func (s *Storage) CustomUpstreamConfig(
 	id string,
 	addr netip.Addr,
 ) (prxConf *proxy.CustomUpstreamConfig) {
-	s.mu.Lock()
+	const maxBuildAttempts = 8
 
-	c, ok := s.index.findByClientID(ClientID(id))
-	if !ok {
-		c, ok = s.findByIP(addr)
-	}
+	for range maxBuildAttempts {
+		s.mu.Lock()
 
-	if !ok {
+		c, ok := s.index.findByClientID(ClientID(id))
+		if !ok {
+			c, ok = s.findByIP(addr)
+		}
+
+		if !ok {
+			s.mu.Unlock()
+
+			return nil
+		}
+
+		cliConf, ok := s.upstreamManager.uidToCustomConf[c.UID]
+		if !ok {
+			s.mu.Unlock()
+
+			return nil
+		}
+
+		if !s.upstreamManager.isConfigChanged(cliConf) {
+			pc := cliConf.proxyConf
+			s.mu.Unlock()
+
+			return pc
+		}
+
+		// Snapshot data needed for config creation under lock, then release.
+		// Building may perform DNS/network I/O (bootstrap).
+		upstreams := slices.Clone(cliConf.upstreams)
+		cacheSize := cliConf.upstreamsCacheSize
+		cacheEnabled := cliConf.upstreamsCacheEnabled
+		commonConfUpdate := s.upstreamManager.confUpdate
+		commonConf := *s.upstreamManager.commonConf
+		clientName := c.Name
 		s.mu.Unlock()
 
-		return nil
-	}
+		newConf, match := s.upstreamManager.buildCustomUpstreamConfig(
+			clientName,
+			upstreams,
+			cacheSize,
+			cacheEnabled,
+			commonConf,
+		)
 
-	cliConf, ok := s.upstreamManager.uidToCustomConf[c.UID]
-	if !ok {
+		s.mu.Lock()
+
+		// Another request may have already stored a fresh config for the same
+		// snapshot while we were building outside the lock.
+		if !s.upstreamManager.isConfigChanged(cliConf) {
+			pc := cliConf.proxyConf
+			s.mu.Unlock()
+			if newConf != nil {
+				_ = newConf.Close()
+			}
+
+			return pc
+		}
+
+		// Discard stale builds when the client or common config changed while
+		// we were outside the lock.  Retry with a fresh snapshot instead of
+		// marking an outdated config as current.
+		if !matchesBuildSnapshot(
+			cliConf,
+			upstreams,
+			cacheSize,
+			cacheEnabled,
+			commonConfUpdate,
+			s.upstreamManager.confUpdate,
+		) {
+			s.mu.Unlock()
+			if newConf != nil {
+				_ = newConf.Close()
+			}
+
+			continue
+		}
+
+		if cliConf.proxyConf != nil {
+			_ = cliConf.proxyConf.Close()
+		}
+		cliConf.proxyConf = newConf
+		cliConf.hasSpecificUpstream = match
+		// Store the snapshot timestamp used for this build, not whatever the
+		// common config may become later under a concurrent update.
+		cliConf.commonConfUpdate = commonConfUpdate
+		cliConf.isChanged = false
 		s.mu.Unlock()
 
-		return nil
+		return newConf
 	}
 
-	if !s.upstreamManager.isConfigChanged(cliConf) {
-		pc := cliConf.proxyConf
-		s.mu.Unlock()
-
-		return pc
-	}
-
-	// Snapshot data needed for config creation under lock, then release.
-	// newCustomUpstreamConfig may perform DNS/network I/O (bootstrap).
-	upstreams := slices.Clone(cliConf.upstreams)
-	cacheSize := cliConf.upstreamsCacheSize
-	cacheEnabled := cliConf.upstreamsCacheEnabled
-	commonConfUpdate := s.upstreamManager.confUpdate
-	commonConf := *s.upstreamManager.commonConf
-	s.mu.Unlock()
-
-	// Create upstream config outside the lock.
-	newConf := s.upstreamManager.buildCustomUpstreamConfig(
-		cliConf,
-		c.Name,
-		upstreams,
-		cacheSize,
-		cacheEnabled,
-		commonConf,
-		commonConfUpdate,
+	// Extremely unlikely: configuration keeps changing under sustained
+	// concurrent updates.  Fail open and let the next request rebuild.
+	s.upstreamManager.logger.Error(
+		"custom upstream config changed too frequently; giving up rebuild",
+		"client_id", id,
+		"addr", addr,
 	)
 
-	// Re-acquire lock to store the result.
+	return nil
+}
+
+// HasCustomDomainSpecificUpstream implements the [dnsforward.ClientsContainer]
+// interface for *Storage.
+func (s *Storage) HasCustomDomainSpecificUpstream(
+	id string,
+	addr netip.Addr,
+	fqdn string,
+) (ok bool) {
+	conf := s.CustomUpstreamConfig(id, addr)
+	if conf == nil {
+		return false
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Double-check: if another goroutine already updated the config for the
-	// same common config snapshot, discard our work and use the existing one.
-	if !s.upstreamManager.isConfigChanged(cliConf) {
-		if newConf != nil {
-			_ = newConf.Close()
-		}
-
-		return cliConf.proxyConf
+	c, found := s.index.findByClientID(ClientID(id))
+	if !found {
+		c, found = s.findByIP(addr)
+	}
+	if !found {
+		return false
 	}
 
-	// Store the freshly built config.
-	if cliConf.proxyConf != nil {
-		_ = cliConf.proxyConf.Close()
+	cliConf, found := s.upstreamManager.uidToCustomConf[c.UID]
+	if !found || cliConf.proxyConf != conf || cliConf.hasSpecificUpstream == nil {
+		return false
 	}
-	cliConf.proxyConf = newConf
-	cliConf.commonConfUpdate = s.upstreamManager.confUpdate
-	cliConf.isChanged = false
 
-	return newConf
+	return cliConf.hasSpecificUpstream(fqdn)
 }
 
 // UpdateCommonUpstreamConfig implements the [dnsforward.ClientsContainer]

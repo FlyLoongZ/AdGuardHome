@@ -745,3 +745,108 @@ func TestIPStringFromAddr(t *testing.T) {
 		assert.Empty(t, ipStringFromAddr(nil))
 	})
 }
+
+func TestServer_ProcessUpstream_DHCPHostRouting(t *testing.T) {
+	const (
+		localDomainSuffix = "lan"
+		unknownHost       = "wronghost." + localDomainSuffix + "."
+	)
+
+	pt := testutil.NewPanicT(t)
+	upsHdlr := dns.HandlerFunc(func(w dns.ResponseWriter, req *dns.Msg) {
+		resp := cmp.Or(
+			aghtest.MatchedResponse(req, dns.TypeA, unknownHost, "1.2.3.4"),
+			(&dns.Msg{}).SetRcode(req, dns.RcodeNameError),
+		)
+
+		require.NoError(pt, w.WriteMsg(resp))
+	})
+	upsAddr := aghtest.StartLocalhostUpstream(t, upsHdlr).String()
+
+	dhcp := &testDHCP{
+		OnEnabled:  func() (ok bool) { return true },
+		OnIPByHost: func(host string) (ip netip.Addr) { return netip.Addr{} },
+	}
+
+	newReq := func() (req *dns.Msg) {
+		return &dns.Msg{
+			MsgHdr: dns.MsgHdr{Id: dns.Id()},
+			Question: []dns.Question{{
+				Name:   unknownHost,
+				Qtype:  dns.TypeA,
+				Qclass: dns.ClassINET,
+			}},
+		}
+	}
+
+	t.Run("no_domain_specific_nxdomain", func(t *testing.T) {
+		s := createTestServer(t, &filtering.Config{
+			BlockingMode: filtering.BlockingModeDefault,
+		}, ServerConfig{
+			UDPListenAddrs: []*net.UDPAddr{{}},
+			TCPListenAddrs: []*net.TCPAddr{{}},
+			TLSConf:        &TLSConfig{},
+			Config: Config{
+				UpstreamDNS:       []string{upsAddr},
+				UpstreamMode:      UpstreamModeLoadBalance,
+				EDNSClientSubnet:  &EDNSClientSubnet{},
+				ClientsContainer:  EmptyClientsContainer{},
+			},
+			ServePlainDNS: true,
+		})
+		s.dhcpServer = dhcp
+		s.localDomainSuffix = localDomainSuffix
+
+		req := newReq()
+		dctx := &dnsContext{
+			proxyCtx: &proxy.DNSContext{
+				Addr:            testClientAddrPort,
+				Req:             req,
+				IsPrivateClient: true,
+			},
+			isDHCPHost: true,
+		}
+
+		rc := s.processUpstream(testutil.ContextWithTimeout(t, testTimeout), testLogger, dctx)
+		require.Equal(t, resultCodeFinish, rc)
+		require.NotNil(t, dctx.proxyCtx.Res)
+		assert.Equal(t, dns.RcodeNameError, dctx.proxyCtx.Res.Rcode)
+	})
+
+	t.Run("domain_specific_routes", func(t *testing.T) {
+		s := createTestServer(t, &filtering.Config{
+			BlockingMode: filtering.BlockingModeDefault,
+		}, ServerConfig{
+			UDPListenAddrs: []*net.UDPAddr{{}},
+			TCPListenAddrs: []*net.TCPAddr{{}},
+			TLSConf:        &TLSConfig{},
+			Config: Config{
+				UpstreamDNS: []string{
+					"[/" + localDomainSuffix + "/]" + upsAddr,
+					"8.8.8.8",
+				},
+				UpstreamMode:     UpstreamModeLoadBalance,
+				EDNSClientSubnet: &EDNSClientSubnet{},
+				ClientsContainer: EmptyClientsContainer{},
+			},
+			ServePlainDNS: true,
+		})
+		s.dhcpServer = dhcp
+		s.localDomainSuffix = localDomainSuffix
+
+		req := newReq()
+		dctx := &dnsContext{
+			proxyCtx: &proxy.DNSContext{
+				Addr:            testClientAddrPort,
+				Req:             req,
+				IsPrivateClient: true,
+			},
+			isDHCPHost: true,
+		}
+
+		rc := s.processUpstream(testutil.ContextWithTimeout(t, testTimeout), testLogger, dctx)
+		require.Equal(t, resultCodeSuccess, rc)
+		require.NotNil(t, dctx.proxyCtx.Res)
+		require.NotEmpty(t, dctx.proxyCtx.Res.Answer)
+	})
+}

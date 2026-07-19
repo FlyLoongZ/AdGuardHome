@@ -14,6 +14,7 @@ type SourceRow = {
     enabled: boolean;
     rulesCount: number;
     lastUpdated: string;
+    lastError?: string;
 };
 
 type TableProps = {
@@ -66,7 +67,16 @@ const Table = ({
             Header: <Trans>name_table_header</Trans>,
             accessor: 'name',
             minWidth: 170,
-            Cell: CellWrap,
+            Cell: ({ original }: any) => (
+                <div className="logs__row logs__text">
+                    <div>{original.name}</div>
+                    {original.lastError ? (
+                        <div className="text-danger text-break mt-1" title={original.lastError}>
+                            {original.lastError}
+                        </div>
+                    ) : null}
+                </div>
+            ),
         },
         {
             Header: <Trans>source_label</Trans>,

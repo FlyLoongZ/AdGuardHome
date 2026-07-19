@@ -541,7 +541,8 @@ func (conf *ServerConfig) loadUpstreams(
 	if conf.UpstreamDNSFileName == "" {
 		upstreams = stringutil.FilterOut(conf.UpstreamDNS, aghnet.IsCommentOrEmpty)
 
-		for _, src := range conf.UpstreamDNSSources {
+		for i := range conf.UpstreamDNSSources {
+			src := &conf.UpstreamDNSSources[i]
 			if !src.Enabled {
 				continue
 			}
@@ -549,13 +550,27 @@ func (conf *ServerConfig) loadUpstreams(
 			data, readErr := os.ReadFile(src.path(dataDir))
 			if readErr != nil {
 				if errors.Is(readErr, os.ErrNotExist) {
-					l.WarnContext(ctx, "upstream source cache does not exist", "id", src.ID, "url", src.URL)
+					// Keep startup best-effort, but surface the miss on the
+					// source so status/API can show that rules were skipped.
+					src.LastError = fmt.Sprintf(
+						"upstream source cache does not exist (id=%d)",
+						src.ID,
+					)
+					l.WarnContext(
+						ctx,
+						"upstream source cache does not exist; rules skipped",
+						"id", src.ID,
+						"url", src.URL,
+					)
 
 					continue
 				}
 
 				return nil, fmt.Errorf("reading upstream source: %w", readErr)
 			}
+
+			// Successful load clears a previous missing-cache error.
+			src.LastError = ""
 
 			lines := stringutil.SplitTrimmed(string(data), "\n")
 			upstreams = append(upstreams, stringutil.FilterOut(lines, aghnet.IsCommentOrEmpty)...)

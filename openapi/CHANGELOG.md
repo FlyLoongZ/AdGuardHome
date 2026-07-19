@@ -8,6 +8,10 @@
 
 The property `interval` of the objects returned from and accepted by the aforementioned APIs can now be any integer between 0 and 8760 (365 days).
 
+### New `"last_error"` field in `UpstreamDnsSource`
+
+- The new optional field `"last_error"` in `GET /control/upstream_dns_sources/status` is the last non-fatal load or refresh error for an upstream DNS source, if any.  It is set when an enabled source fails to download or its cache is missing and rules were skipped.
+
 ## v0.107.77: API changes
 
 ### New `reason` query parameter in 'GET /control/querylog'

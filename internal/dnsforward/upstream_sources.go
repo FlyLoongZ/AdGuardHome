@@ -26,8 +26,13 @@ import (
 )
 
 // upstreamSourcesCacheDir is the subdirectory under the filtering data
-// directory used for both filter lists and upstream source caches.
-const upstreamSourcesCacheDir = "filters"
+// directory used for upstream source caches.  It is intentionally separate
+// from filtering-rule lists (filters/) so the two never overwrite each other.
+const upstreamSourcesCacheDir = "upstream_sources"
+
+// legacyUpstreamSourcesCacheDir is the old cache location that shared the
+// filtering-rule list directory.  Existing installs are migrated on startup.
+const legacyUpstreamSourcesCacheDir = "filters"
 
 // maxUpstreamSourceSize is the maximum size of an upstream source list.  It
 // matches the default filtering-rule list limit so large downloads cannot
@@ -49,17 +54,30 @@ type UpstreamDNSSourceYAML struct {
 	Name        string    `yaml:"name"`
 	RulesCount  int       `yaml:"-"`
 	LastUpdated time.Time `yaml:"-"`
-	checksum    uint64
+	// LastError is the last non-fatal load/refresh error for this source.  It
+	// is exposed via the status API so operators can see when an enabled
+	// source failed to load without scanning logs.
+	LastError string `yaml:"-"`
+	checksum  uint64
 
 	UpstreamDNSSource `yaml:",inline"`
 }
 
-// path returns the cache file path for source contents.  Cache files share the
-// same naming scheme as filtering-rule lists: filters/{id}.txt.
+// path returns the cache file path for source contents.
 func (s *UpstreamDNSSourceYAML) path(dataDir string) string {
 	return filepath.Join(
 		dataDir,
 		upstreamSourcesCacheDir,
+		strconv.FormatUint(s.ID, 10)+".txt",
+	)
+}
+
+// legacyPath returns the pre-migration cache path that lived next to filtering
+// rule lists.
+func (s *UpstreamDNSSourceYAML) legacyPath(dataDir string) string {
+	return filepath.Join(
+		dataDir,
+		legacyUpstreamSourcesCacheDir,
 		strconv.FormatUint(s.ID, 10)+".txt",
 	)
 }
@@ -82,6 +100,7 @@ func (s *UpstreamDNSSourceYAML) ensureName(title string) {
 func (s *UpstreamDNSSourceYAML) clear() {
 	s.RulesCount = 0
 	s.LastUpdated = time.Time{}
+	s.LastError = ""
 	s.checksum = 0
 }
 
@@ -104,7 +123,7 @@ type sourcePrepared struct {
 // used to roll the filesystem back when a later step (for example reconfigure)
 // fails after caches have already been written.
 type commitRecord struct {
-	// dst is the final cache path filters/{id}.txt.
+	// dst is the final cache path upstream_sources/{id}.txt.
 	dst string
 	// backup is dst+".old" when an existing cache was moved aside; empty when
 	// the cache file was newly created.
@@ -154,11 +173,17 @@ func newSourceManager(conf *ServerConfig, l *slog.Logger, f *filtering.DNSFilter
 		for i := range conf.UpstreamDNSSources {
 			src := &conf.UpstreamDNSSources[i]
 			if f != nil && src.ID != 0 {
+				// Keep IDs unique across filter lists and upstream sources so
+				// configuration remains unambiguous even though cache files
+				// now live in separate directories.
 				f.ReserveListID(src.ID)
 			}
 
+			sm.migrateLegacyCache(src)
+
 			err := sm.loadMetadata(src)
 			if err != nil {
+				src.LastError = err.Error()
 				l.Warn("loading upstream source cache metadata", "url", src.URL, slogutil.KeyError, err)
 			} else if src.LastUpdated.IsZero() {
 				l.Debug("no cached metadata for upstream source, will fetch on next refresh", "url", src.URL)
@@ -171,13 +196,70 @@ func newSourceManager(conf *ServerConfig, l *slog.Logger, f *filtering.DNSFilter
 	return sm
 }
 
+// migrateLegacyCache moves a source cache from the old filters/ directory into
+// upstream_sources/ when needed.  Failures are logged and non-fatal.
+func (m *sourceManager) migrateLegacyCache(src *UpstreamDNSSourceYAML) {
+	if m.dataDir == "" || src == nil || src.ID == 0 {
+		return
+	}
+
+	dst := src.path(m.dataDir)
+	if _, err := os.Stat(dst); err == nil {
+		return
+	} else if err != nil && !stderrors.Is(err, os.ErrNotExist) {
+		m.logger.Warn(
+			"checking upstream source cache",
+			"path", dst,
+			slogutil.KeyError, err,
+		)
+
+		return
+	}
+
+	legacy := src.legacyPath(m.dataDir)
+	if _, err := os.Stat(legacy); err != nil {
+		return
+	}
+
+	if err := os.MkdirAll(m.cacheDir(), aghos.DefaultPermDir); err != nil {
+		m.logger.Warn(
+			"creating upstream source cache dir for migration",
+			"path", m.cacheDir(),
+			slogutil.KeyError, err,
+		)
+
+		return
+	}
+
+	if err := os.Rename(legacy, dst); err != nil {
+		m.logger.Warn(
+			"migrating upstream source cache",
+			"from", legacy,
+			"to", dst,
+			slogutil.KeyError, err,
+		)
+
+		return
+	}
+
+	m.logger.Info(
+		"migrated upstream source cache",
+		"from", legacy,
+		"to", dst,
+	)
+
+	// Drop leftover backup next to the legacy path, if any.
+	_ = os.Remove(legacy + ".old")
+}
+
 func (m *sourceManager) cacheDir() string {
 	return filepath.Join(m.dataDir, upstreamSourcesCacheDir)
 }
 
 // openSource returns a reader for a remote URL or a local absolute file path.
-// Local paths are restricted by the filtering SafeFS patterns.
-func (m *sourceManager) openSource(srcURL string) (r io.ReadCloser, err error) {
+// Local paths are restricted by the filtering SafeFS patterns.  ctx controls
+// cancellation of remote downloads.
+func (m *sourceManager) openSource(ctx context.Context, srcURL string) (r io.ReadCloser, err error) {
 	if filepath.IsAbs(srcURL) {
 		path := filepath.Clean(srcURL)
 		if !filtering.PathMatchesAny(m.safeFSPatterns, path) {
@@ -192,7 +274,12 @@ func (m *sourceManager) openSource(srcURL string) (r io.ReadCloser, err error) {
 		return r, nil
 	}
 
-	resp, err := m.httpClient.Get(srcURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srcURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+
+	resp, err := m.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("reading from url: %w", err)
 	}
@@ -229,7 +316,7 @@ func (m *sourceManager) prepare(ctx context.Context, src UpstreamDNSSourceYAML) 
 		return p, errors.New("filtering data directory is not configured")
 	}
 
-	r, err := m.openSource(src.URL)
+	r, err := m.openSource(ctx, src.URL)
 	if err != nil {
 		return p, err
 	}
@@ -319,6 +406,7 @@ func (m *sourceManager) commit(src *UpstreamDNSSourceYAML, p sourcePrepared) (re
 			src.RulesCount = p.count
 			src.checksum = p.checksum
 			src.LastUpdated = p.lastUpdated
+			src.LastError = ""
 
 			return rec, false, nil
 		}
@@ -362,6 +450,7 @@ func (m *sourceManager) commit(src *UpstreamDNSSourceYAML, p sourcePrepared) (re
 	src.RulesCount = p.count
 	src.checksum = p.checksum
 	src.LastUpdated = p.lastUpdated
+	src.LastError = ""
 
 	return rec, true, nil
 }
@@ -526,25 +615,26 @@ func (m *sourceManager) finalizeRemoved(prev, staged []UpstreamDNSSourceYAML) {
 			continue
 		}
 
-		path := (&UpstreamDNSSourceYAML{UpstreamDNSSource: UpstreamDNSSource{ID: cur.ID}}).path(m.dataDir)
-		if rmErr := os.Remove(path); rmErr != nil && !stderrors.Is(rmErr, os.ErrNotExist) {
-			m.logger.ErrorContext(context.Background(), "removing source cache", "path", path, slogutil.KeyError, rmErr)
-		}
+		src := &UpstreamDNSSourceYAML{UpstreamDNSSource: UpstreamDNSSource{ID: cur.ID}}
+		for _, path := range []string{src.path(m.dataDir), src.legacyPath(m.dataDir)} {
+			if rmErr := os.Remove(path); rmErr != nil && !stderrors.Is(rmErr, os.ErrNotExist) {
+				m.logger.ErrorContext(context.Background(), "removing source cache", "path", path, slogutil.KeyError, rmErr)
+			}
 
-		// Also drop any leftover backup files from older versions or failed applies.
-		oldPath := path + ".old"
-		if rmErr := os.Remove(oldPath); rmErr != nil && !stderrors.Is(rmErr, os.ErrNotExist) {
-			m.logger.ErrorContext(context.Background(), "removing source cache backup", "path", oldPath, slogutil.KeyError, rmErr)
+			// Also drop any leftover backup files from older versions or failed applies.
+			oldPath := path + ".old"
+			if rmErr := os.Remove(oldPath); rmErr != nil && !stderrors.Is(rmErr, os.ErrNotExist) {
+				m.logger.ErrorContext(context.Background(), "removing source cache backup", "path", oldPath, slogutil.KeyError, rmErr)
+			}
 		}
 	}
 }
 
-// cleanupStaleCacheFiles removes leftover temporary and legacy cache files.
-// Permanent {id}.txt files are left alone because they may belong to
-// filtering-rule lists.  Active {id}.txt.old commit backups are also preserved
-// so a reconfigure that recreates the manager cannot destroy an in-flight
-// rollback transaction; those backups are removed by cleanupCommitBackups or
-// finalizeRemoved after the transaction settles.
+// cleanupStaleCacheFiles removes leftover temporary cache files under the
+// upstream source cache directory.  Active {id}.txt.old commit backups are
+// preserved so a reconfigure that recreates the manager cannot destroy an
+// in-flight rollback transaction; those backups are removed by
+// cleanupCommitBackups or finalizeRemoved after the transaction settles.
 func (m *sourceManager) cleanupStaleCacheFiles() {
 	if m.dataDir == "" {
 		return
@@ -552,8 +642,6 @@ func (m *sourceManager) cleanupStaleCacheFiles() {
 
 	patterns := []string{
 		filepath.Join(m.cacheDir(), "src-*.tmp"),
-		filepath.Join(m.cacheDir(), "upstream-*.txt"),
-		filepath.Join(m.cacheDir(), "upstream-*.txt.old"),
 	}
 	for _, pattern := range patterns {
 		matches, err := filepath.Glob(pattern)
@@ -598,6 +686,7 @@ func (m *sourceManager) stageAddPrepared(src UpstreamDNSSourceYAML, p sourcePrep
 	src.RulesCount = p.count
 	src.checksum = p.checksum
 	src.LastUpdated = p.lastUpdated
+	src.LastError = ""
 
 	staged = append(staged, src)
 	prepared[len(staged)-1] = p
@@ -743,6 +832,7 @@ func (m *sourceManager) stageSetPrepared(plan setPlan, prepared sourcePrepared) 
 		src.RulesCount = prepared.count
 		src.checksum = prepared.checksum
 		src.LastUpdated = prepared.lastUpdated
+		src.LastError = ""
 		preparedList[idx] = prepared
 	}
 
@@ -805,6 +895,7 @@ func (m *sourceManager) stageRefreshPrepared(
 		// shared filters_update_interval expiry works even when content is
 		// unchanged, matching filtering-rule list behaviour.
 		src.LastUpdated = p.lastUpdated
+		src.LastError = ""
 		prepared[i] = p
 
 		if wasUpdated {
@@ -898,8 +989,8 @@ func (m *sourceManager) byURL(srcURL string) (src UpstreamDNSSourceYAML, ok bool
 }
 
 // ensureCaches downloads and commits enabled upstream sources whose cache
-// files are missing.  Failures are logged and skipped so that DNS startup is
-// not blocked by a single unreachable source.
+// files are missing.  Failures are recorded on the source as LastError and
+// skipped so that DNS startup is not blocked by a single unreachable source.
 func (m *sourceManager) ensureCaches(ctx context.Context) {
 	if m.conf == nil || m.conf.UpstreamDNSFileName != "" {
 		return
@@ -911,12 +1002,21 @@ func (m *sourceManager) ensureCaches(ctx context.Context) {
 			continue
 		}
 
+		m.migrateLegacyCache(src)
+
 		cachePath := src.path(m.dataDir)
 		_, err := os.Stat(cachePath)
 		if err == nil {
+			// Cache is present; clear stale load errors from previous boots.
+			if strings.Contains(src.LastError, "cache does not exist") ||
+				strings.Contains(src.LastError, "cache missing") {
+				src.LastError = ""
+			}
+
 			continue
 		}
 		if !stderrors.Is(err, os.ErrNotExist) {
+			src.LastError = err.Error()
 			m.logger.WarnContext(
 				ctx,
 				"checking upstream source cache",
@@ -931,6 +1031,7 @@ func (m *sourceManager) ensureCaches(ctx context.Context) {
 
 		p, prepErr := m.prepare(ctx, src.clone())
 		if prepErr != nil {
+			src.LastError = prepErr.Error()
 			m.logger.WarnContext(
 				ctx,
 				"fetching missing upstream source cache",
@@ -946,6 +1047,7 @@ func (m *sourceManager) ensureCaches(ctx context.Context) {
 		_, _, commitErr := m.commit(src, p)
 		if commitErr != nil {
 			_ = os.Remove(p.tmpPath)
+			src.LastError = commitErr.Error()
 			m.logger.WarnContext(
 				ctx,
 				"committing missing upstream source cache",
