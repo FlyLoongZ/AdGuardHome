@@ -724,6 +724,50 @@ class Api {
         return this.makeRequest(path, method, config);
     }
 
+    // Upstream DNS sources (DNS routing)
+    UPSTREAM_DNS_SOURCES_STATUS = { path: 'upstream_dns_sources/status', method: 'GET' };
+
+    UPSTREAM_DNS_SOURCES_ADD = { path: 'upstream_dns_sources/add_url', method: 'POST' };
+
+    UPSTREAM_DNS_SOURCES_REMOVE = { path: 'upstream_dns_sources/remove_url', method: 'POST' };
+
+    UPSTREAM_DNS_SOURCES_SET = { path: 'upstream_dns_sources/set_url', method: 'POST' };
+
+    UPSTREAM_DNS_SOURCES_REFRESH = { path: 'upstream_dns_sources/refresh', method: 'POST' };
+
+    getUpstreamDnsSourcesStatus() {
+        const { path, method } = this.UPSTREAM_DNS_SOURCES_STATUS;
+
+        return this.makeRequest(path, method);
+    }
+
+    addUpstreamDnsSource(data: { name?: string; url: string }) {
+        const { path, method } = this.UPSTREAM_DNS_SOURCES_ADD;
+
+        return this.makeRequest(path, method, { data });
+    }
+
+    removeUpstreamDnsSource(data: { url: string }) {
+        const { path, method } = this.UPSTREAM_DNS_SOURCES_REMOVE;
+
+        return this.makeRequest(path, method, { data });
+    }
+
+    setUpstreamDnsSource(data: {
+        url: string;
+        data: { name?: string; url?: string; enabled?: boolean };
+    }) {
+        const { path, method } = this.UPSTREAM_DNS_SOURCES_SET;
+
+        return this.makeRequest(path, method, { data });
+    }
+
+    refreshUpstreamDnsSources(data: Record<string, never> = {}) {
+        const { path, method } = this.UPSTREAM_DNS_SOURCES_REFRESH;
+
+        return this.makeRequest(path, method, { data });
+    }
+
     SET_PROTECTION = { path: 'protection', method: 'POST' };
 
     setProtection(data: any) {

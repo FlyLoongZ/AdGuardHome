@@ -104,6 +104,11 @@ export const Menu = (props: Props) => {
                             routePath: RoutePath.DnsRewrites,
                         },
                         {
+                            label: intl.getMessage('dns_routing'),
+                            path: Paths.DnsRouting,
+                            routePath: RoutePath.DnsRouting,
+                        },
+                        {
                             label: intl.getMessage('blocked_services'),
                             path: Paths.BlockedServices,
                             routePath: RoutePath.BlockedServices,

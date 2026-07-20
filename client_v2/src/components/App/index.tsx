@@ -14,6 +14,7 @@ import { LOCAL_STORAGE_KEYS, LocalStorageHelper } from 'panel/helpers/localStora
 
 import { Allowlists } from 'panel/components/FilterLists/Allowlists';
 import { DNSRewrites } from 'panel/components/FilterLists/DNSRewrites';
+import { DnsRouting } from 'panel/components/FilterLists/DnsRouting';
 import { SetupGuide } from 'panel/components/SetupGuide';
 import { Dashboard } from 'panel/components/Dashboard';
 import { Dhcp } from 'panel/components/Dhcp';
@@ -134,6 +135,7 @@ const App = () => {
             <Route path={Paths.DnsAllowlists} component={Allowlists} />
             <Route path={Paths.CustomRules} component={UserRules} />
             <Route path={Paths.DnsRewrites} component={DNSRewrites} />
+            <Route path={Paths.DnsRouting} component={DnsRouting} />
             <Route path={Paths.Dhcp} component={Dhcp} />
             <Route path={Paths.DhcpLeases} component={LeasesPage} />
             <Route path={Paths.Guide} component={SetupGuideRoute} />

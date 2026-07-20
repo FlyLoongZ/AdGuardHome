@@ -860,5 +860,19 @@
   "whois": "WHOIS",
   "yes": "是",
   "yes_disable": "禁用",
-  "yes_reset": "重置"
+  "yes_reset": "重置",
+  "dns_routing": "DNS 分流",
+  "dns_routing_add": "添加 DNS 分流",
+  "dns_routing_desc": "管理提供按域名分流上游规则的外部文件和 URL。",
+  "dns_routing_edit": "编辑 DNS 分流",
+  "dns_routing_empty": "尚未添加 DNS 分流源",
+  "dns_routing_new": "新建 DNS 分流",
+  "enter_name_hint": "输入名称",
+  "enter_url_or_path_hint": "请输入 URL 或列表的绝对路径",
+  "upstream_dns_source_added_successfully": "DNS 分流添加成功",
+  "upstream_dns_source_confirm_delete": "确定要删除这个上游源吗？",
+  "upstream_dns_source_removed_successfully": "DNS 分流删除成功",
+  "upstream_dns_source_updated": "DNS 分流已更新",
+  "upstream_dns_sources_configured_in_file_warning": "当前上游 DNS 通过文件 %path% 配置。为避免设置冲突，已禁用源管理。",
+  "upstream_dns_sources_input_hint": "输入包含上游 DNS 规则的源 URL 或绝对文件路径。"
 }
