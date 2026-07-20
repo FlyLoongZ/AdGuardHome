@@ -636,47 +636,6 @@ func TestNewSourceManager_MigratesLegacyCache(t *testing.T) {
 	require.Equal(t, 2, conf.UpstreamDNSSources[0].RulesCount)
 }
 
-func TestSourceManager_EnsureCaches_FetchesMissing(t *testing.T) {
-	tmpDir := t.TempDir()
-	srcPath := filepath.Join(tmpDir, "upstreams.txt")
-	require.NoError(t, os.WriteFile(srcPath, []byte("[/example.org/]1.1.1.1\n[/example.net/]9.9.9.9\n"), 0o644))
-
-	dataDir := filepath.Join(tmpDir, "data")
-	conf := &ServerConfig{
-		Config: Config{
-			UpstreamDNSSources: []UpstreamDNSSourceYAML{{
-				Enabled: true,
-				URL:     srcPath,
-				Name:    "local",
-				UpstreamDNSSource: UpstreamDNSSource{ID: 1},
-			}},
-		},
-	}
-
-	flt, err := filtering.New(&filtering.Config{
-		Logger:          testLogger,
-		DataDir:         dataDir,
-		SafeFSPatterns:  []string{filepath.Join(tmpDir, "*")},
-		BlockedServices: emptyFilteringBlockedServices(),
-	}, nil)
-	require.NoError(t, err)
-
-	sm := newSourceManager(conf, testLogger, flt)
-	require.Zero(t, conf.UpstreamDNSSources[0].RulesCount)
-
-	_, err = os.Stat(conf.UpstreamDNSSources[0].path(dataDir))
-	require.ErrorIs(t, err, os.ErrNotExist)
-
-	ctx := testutil.ContextWithTimeout(t, testTimeout)
-	sm.ensureCaches(ctx)
-
-	require.Equal(t, 2, conf.UpstreamDNSSources[0].RulesCount)
-	assert.False(t, conf.UpstreamDNSSources[0].LastUpdated.IsZero())
-	assert.Empty(t, conf.UpstreamDNSSources[0].LastError)
-	_, err = os.Stat(conf.UpstreamDNSSources[0].path(dataDir))
-	require.NoError(t, err)
-}
-
 func TestLoadUpstreams_MissingCacheSetsLastError(t *testing.T) {
 	dataDir := t.TempDir()
 	conf := &ServerConfig{
@@ -804,6 +763,13 @@ func TestApplyUpstreamSourceStage_ReconfigureFailureReloadsAfterRollback(t *test
 	require.NoError(t, os.WriteFile(srcPath, []byte(oldContent), 0o644))
 
 	dataDir := filepath.Join(tmpDir, "data")
+	// Seed the on-disk cache the way production does: Prepare only loads local
+	// caches and does not download remote/local sources itself.
+	cacheDir := filepath.Join(dataDir, upstreamSourcesCacheDir)
+	require.NoError(t, os.MkdirAll(cacheDir, 0o755))
+	cachePath := filepath.Join(cacheDir, "1.txt")
+	require.NoError(t, os.WriteFile(cachePath, []byte(oldContent), 0o644))
+
 	srv := createTestServer(t, &filtering.Config{
 		FilteringEnabled: true,
 		BlockingMode:     filtering.BlockingModeDefault,
@@ -829,7 +795,6 @@ func TestApplyUpstreamSourceStage_ReconfigureFailureReloadsAfterRollback(t *test
 		TCPListenAddrs: []*net.TCPAddr{},
 	})
 
-	cachePath := srv.conf.UpstreamDNSSources[0].path(dataDir)
 	oldCache, err := os.ReadFile(cachePath)
 	require.NoError(t, err)
 	require.Equal(t, oldContent, string(oldCache))

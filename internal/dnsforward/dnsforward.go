@@ -347,12 +347,17 @@ func (s *Server) UpstreamTimeout() (t time.Duration) {
 
 // Resolve gets IP addresses by host name from an upstream server.  No
 // request/response filtering is performed.  Query log and Stats are not
-// updated.  This method may be called before [Server.Start].
-func (s *Server) Resolve(ctx context.Context, net, host string) (addr []netip.Addr, err error) {
+// updated.  This method may be called before [Server.Start], but only after
+// [Server.Prepare] has created the internal proxy.
+func (s *Server) Resolve(ctx context.Context, network, host string) (addr []netip.Addr, err error) {
 	s.serverLock.RLock()
 	defer s.serverLock.RUnlock()
 
-	return s.internalProxy.LookupNetIP(ctx, net, host)
+	if s.internalProxy == nil {
+		return nil, errors.Error("dns server is not ready")
+	}
+
+	return s.internalProxy.LookupNetIP(ctx, network, host)
 }
 
 const (
@@ -487,9 +492,9 @@ func (s *Server) startLocked(ctx context.Context) error {
 	return err
 }
 
-// testPrepareHook, if non-nil, is called from Prepare after upstream source
-// caches have been loaded.  Tests use it to inject failures after loadMetadata
-// has already observed the on-disk caches.
+// testPrepareHook, if non-nil, is called early from Prepare after the source
+// manager is created.  Tests use it to inject failures before reconfigure
+// proceeds further.
 var testPrepareHook func(s *Server) (err error)
 
 // Prepare initializes parameters of s using data from conf.  conf must not be
@@ -498,9 +503,11 @@ func (s *Server) Prepare(ctx context.Context, conf *ServerConfig) (err error) {
 	s.conf = *conf
 	s.upstreamSources = newSourceManager(&s.conf, s.logger, s.dnsFilter)
 
-	// Fetch enabled upstream sources whose caches are missing before loading
-	// upstreams, so rules from configuration are not silently dropped.
-	s.upstreamSources.ensureCaches(ctx)
+	// Do not download remote upstream sources here.  Matching filtering-rule
+	// lists, Prepare only uses on-disk caches (via loadUpstreams).  Missing
+	// sources are fetched after DNS is running through the shared filtering
+	// AfterUpdate path (RefreshUpstreamSources).  Fetching here would resolve
+	// hostnames through Server.DialContext while internalProxy is still nil.
 
 	if testPrepareHook != nil {
 		err = testPrepareHook(s)

@@ -825,10 +825,17 @@ func TestServer_HandleUpstreamDNSSources_RefreshPartialSuccess(t *testing.T) {
 	require.NoError(t, os.WriteFile(goodSrcPath, []byte("[/example.org/]1.1.1.1\n"), 0o644))
 	require.NoError(t, os.WriteFile(badSrcPath, []byte("[/example.net/]9.9.9.9\n"), 0o644))
 
+	// Seed local caches; Prepare only loads on-disk caches and does not fetch.
+	dataDir := filepath.Join(tmpDir, "data")
+	cacheDir := filepath.Join(dataDir, upstreamSourcesCacheDir)
+	require.NoError(t, os.MkdirAll(cacheDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(cacheDir, "1.txt"), []byte("[/example.org/]1.1.1.1\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(cacheDir, "2.txt"), []byte("[/example.net/]9.9.9.9\n"), 0o644))
+
 	srv := createTestServer(t, &filtering.Config{
 		FilteringEnabled: true,
 		BlockingMode:     filtering.BlockingModeDefault,
-		DataDir:          filepath.Join(tmpDir, "data"),
+		DataDir:          dataDir,
 		SafeFSPatterns:   []string{filepath.Join(tmpDir, "*")},
 	}, ServerConfig{
 		Config: Config{
@@ -859,8 +866,9 @@ func TestServer_HandleUpstreamDNSSources_RefreshPartialSuccess(t *testing.T) {
 	require.Len(t, sourcesBefore, 2)
 	goodBefore := sourcesBefore[0].LastUpdated
 	badBefore := sourcesBefore[1].LastUpdated
-	// Change the good source so refresh reports an update.  Prepare already
-	// fetched the original contents via ensureCaches during server setup.
+	require.False(t, goodBefore.IsZero())
+	require.False(t, badBefore.IsZero())
+	// Change sources so refresh updates the good one and fails the bad one.
 	require.NoError(t, os.WriteFile(goodSrcPath, []byte("[/example.org/]8.8.8.8\n"), 0o644))
 	require.NoError(t, os.WriteFile(badSrcPath, []byte("udp://://bad\n"), 0o644))
 
