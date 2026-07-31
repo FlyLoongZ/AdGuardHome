@@ -1,4 +1,4 @@
-package dnsforward
+package client
 
 import (
 	"testing"
@@ -59,13 +59,13 @@ func TestHasDomainSpecificUpstream(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, hasDomainSpecificUpstream(upsConf, tc.fqdn))
+			assert.Equal(t, tc.want, HasDomainSpecificUpstream(upsConf, tc.fqdn))
 		})
 	}
 
 	t.Run("nil_config", func(t *testing.T) {
 		t.Parallel()
 
-		assert.False(t, hasDomainSpecificUpstream(nil, "pc.lan."))
+		assert.False(t, HasDomainSpecificUpstream(nil, "pc.lan."))
 	})
 }

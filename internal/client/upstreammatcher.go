@@ -6,22 +6,10 @@ import (
 	"github.com/AdguardTeam/dnsproxy/proxy"
 )
 
-// newSpecificUpstreamMatcher returns a matcher that reports whether fqdn would
-// use a domain-specific upstream instead of the default upstream set.
-func newSpecificUpstreamMatcher(uc *proxy.UpstreamConfig) (match func(fqdn string) (ok bool)) {
-	if uc == nil {
-		return nil
-	}
-
-	return func(fqdn string) (ok bool) {
-		return hasDomainSpecificUpstream(uc, fqdn)
-	}
-}
-
-// hasDomainSpecificUpstream returns true if resolving fqdn would use a
+// HasDomainSpecificUpstream returns true if resolving fqdn would use a
 // domain-specific upstream from uc instead of the default upstream set.  The
 // matching rules mirror [proxy.UpstreamConfig] domain lookup behavior.
-func hasDomainSpecificUpstream(uc *proxy.UpstreamConfig, fqdn string) (ok bool) {
+func HasDomainSpecificUpstream(uc *proxy.UpstreamConfig, fqdn string) (ok bool) {
 	if uc == nil || len(uc.DomainReservedUpstreams) == 0 {
 		return false
 	}
@@ -51,4 +39,16 @@ func hasDomainSpecificUpstream(uc *proxy.UpstreamConfig, fqdn string) (ok bool) 
 	}
 
 	return false
+}
+
+// newSpecificUpstreamMatcher returns a matcher that reports whether fqdn would
+// use a domain-specific upstream instead of the default upstream set.
+func newSpecificUpstreamMatcher(uc *proxy.UpstreamConfig) (match func(fqdn string) (ok bool)) {
+	if uc == nil {
+		return nil
+	}
+
+	return func(fqdn string) (ok bool) {
+		return HasDomainSpecificUpstream(uc, fqdn)
+	}
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AdguardTeam/AdGuardHome/internal/client"
 	"github.com/AdguardTeam/AdGuardHome/internal/filtering"
 	"github.com/AdguardTeam/dnsproxy/proxy"
 	"github.com/AdguardTeam/golibs/netutil"
@@ -552,7 +553,7 @@ func (s *Server) canRouteDHCPHost(fqdn string, pctx *proxy.DNSContext) (ok bool)
 	s.serverLock.RLock()
 	defer s.serverLock.RUnlock()
 
-	return hasDomainSpecificUpstream(s.conf.UpstreamConfig, fqdn)
+	return client.HasDomainSpecificUpstream(s.conf.UpstreamConfig, fqdn)
 }
 
 // Apply filtering logic after we have received response from upstream servers.
