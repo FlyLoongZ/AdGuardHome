@@ -2,6 +2,14 @@
 
 <!-- TODO(a.garipov): Reformat in accordance with the KeepAChangelog spec. -->
 
+## v0.107.80: API changes
+
+### New `noerror` value in `DnsBlockingMode`
+
+- The new value `"noerror"` of the `blocking_mode` property in the DNS config
+  APIs makes the server respond to blocked requests with an empty `NOERROR`
+  response (a `NODATA` response with a `SOA` record in the authority section).
+
 ## v0.107.79: API changes
 
 ### Setting the UI language through the install API

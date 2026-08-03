@@ -148,6 +148,8 @@ func (s *Server) genForBlockingMode(
 		return s.NewMsgNXDOMAIN(req)
 	case filtering.BlockingModeREFUSED:
 		return s.makeResponseREFUSED(req)
+	case filtering.BlockingModeNOERROR:
+		return s.NewMsgNODATA(req)
 	default:
 		s.logger.ErrorContext(ctx, "invalid blocking mode", "mode", mode)
 

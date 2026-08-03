@@ -1749,6 +1749,57 @@ func TestNullBlockedRequest(t *testing.T) {
 	)
 }
 
+func TestNOERRORBlockedRequest(t *testing.T) {
+	forwardConf := ServerConfig{
+		UDPListenAddrs: []*net.UDPAddr{{}},
+		TCPListenAddrs: []*net.TCPAddr{{}},
+		TLSConf:        &TLSConfig{},
+		Config: Config{
+			UpstreamMode: UpstreamModeLoadBalance,
+			EDNSClientSubnet: &EDNSClientSubnet{
+				Enabled: false,
+			},
+			ClientsContainer: EmptyClientsContainer{},
+		},
+		ServePlainDNS: true,
+	}
+	s := createTestServer(
+		t,
+		&filtering.Config{ProtectionEnabled: true, BlockingMode: filtering.BlockingModeNOERROR},
+		forwardConf,
+	)
+	startDeferStop(t, s)
+	addr := s.dnsProxy.Addr(proxy.ProtoUDP)
+
+	// Blocked request must be answered with an empty NOERROR (NODATA)
+	// response: no answers, but a SOA record in the authority section for
+	// negative caching.
+	req := dns.Msg{
+		MsgHdr: dns.MsgHdr{
+			Id:               dns.Id(),
+			RecursionDesired: true,
+		},
+		Question: []dns.Question{{
+			Name:   "NULL.example.org.",
+			Qtype:  dns.TypeA,
+			Qclass: dns.ClassINET,
+		}},
+	}
+
+	reply, err := dns.Exchange(&req, addr.String())
+	require.NoErrorf(t, err, "couldn't talk to server %s: %s", addr, err)
+
+	assert.Equal(t, dns.RcodeSuccess, reply.Rcode)
+	assert.Empty(t, reply.Answer, "noerror blocking mode must not return answers")
+	require.Lenf(
+		t,
+		reply.Ns,
+		1,
+		"noerror blocking mode must return a SOA record in the authority section",
+	)
+	testutil.RequireTypeAssert[*dns.SOA](t, reply.Ns[0])
+}
+
 func TestBlockedCustomIP(t *testing.T) {
 	rules := "||nxdomain.example.org^\n||NULL.example.org^\n127.0.0.1	host.example.org\n@@||whitelist.example.org^\n||127.0.0.255\n"
 	filters := []filtering.Filter{{

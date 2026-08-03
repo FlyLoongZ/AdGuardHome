@@ -194,6 +194,7 @@ export const BLOCKING_MODES = {
     nxdomain: 'nxdomain',
     null_ip: 'null_ip',
     custom_ip: 'custom_ip',
+    noerror: 'noerror',
 };
 
 // Note that translation strings contain these modes (theme_CONSTANT)

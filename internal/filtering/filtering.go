@@ -219,6 +219,9 @@ const (
 
 	// BlockingModeREFUSED means respond with the REFUSED code.
 	BlockingModeREFUSED BlockingMode = "refused"
+
+	// BlockingModeNOERROR means respond with an empty NOERROR response.
+	BlockingModeNOERROR BlockingMode = "noerror"
 )
 
 // LookupStats store stats collected during safebrowsing or parental checks

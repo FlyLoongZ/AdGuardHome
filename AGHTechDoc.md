@@ -1077,7 +1077,7 @@ Response:
 
 		"protection_enabled": true | false,
 		"ratelimit": 1234,
-		"blocking_mode": "default" | "refused" | "nxdomain" | "null_ip" | "custom_ip",
+		"blocking_mode": "default" | "refused" | "nxdomain" | "null_ip" | "custom_ip" | "noerror",
 		"blocking_ipv4": "1.2.3.4",
 		"blocking_ipv6": "1:2:3::4",
 		"edns_cs_enabled": true | false,
@@ -1103,7 +1103,7 @@ Request:
 
 		"protection_enabled": true | false,
 		"ratelimit": 1234,
-		"blocking_mode": "default" | "refused" | "nxdomain" | "null_ip" | "custom_ip",
+		"blocking_mode": "default" | "refused" | "nxdomain" | "null_ip" | "custom_ip" | "noerror",
 		"blocking_ipv4": "1.2.3.4",
 		"blocking_ipv6": "1:2:3::4",
 		"edns_cs_enabled": true | false,
@@ -1124,6 +1124,7 @@ Response:
 * NXDOMAIN: Respond with NXDOMAIN code
 * Null IP: Respond with zero IP address (0.0.0.0 for A; :: for AAAA)
 * Custom IP: Respond with a manually set IP address
+* NOERROR: Respond with an empty NOERROR response (NODATA, with a SOA record in the authority section)
 
 `blocking_ipv4` and `blocking_ipv6` values are active when `blocking_mode` is set to `custom_ip`.
 

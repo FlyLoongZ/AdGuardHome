@@ -200,6 +200,7 @@ export const BLOCKING_MODES = {
     nxdomain: 'nxdomain',
     null_ip: 'null_ip',
     custom_ip: 'custom_ip',
+    noerror: 'noerror',
 };
 
 export const EDNS_MODES = {

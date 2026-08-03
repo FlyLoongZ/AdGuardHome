@@ -2142,12 +2142,17 @@
 
          *  `refused`: Respond with the `REFUSET` code.
 
+         *  `noerror`: Respond with an empty `NOERROR` response (a `NODATA`
+            response with a `SOA` record in the authority section for
+            negative caching).
+
       'enum':
       - 'custom_ip'
       - 'default'
       - 'null_ip'
       - 'nxdomain'
       - 'refused'
+      - 'noerror'
       'type': 'string'
 
     'DnsClass':

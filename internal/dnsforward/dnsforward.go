@@ -769,6 +769,7 @@ func validateBlockingMode(
 	case
 		filtering.BlockingModeDefault,
 		filtering.BlockingModeNXDOMAIN,
+		filtering.BlockingModeNOERROR,
 		filtering.BlockingModeREFUSED,
 		filtering.BlockingModeNullIP:
 		return nil
