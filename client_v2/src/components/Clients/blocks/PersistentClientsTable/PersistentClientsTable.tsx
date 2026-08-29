@@ -7,7 +7,7 @@ import type { Client, NormalizedTopClients } from 'panel/initialState';
 import { LOCAL_STORAGE_KEYS, LocalStorageHelper } from 'panel/helpers/localStorageHelper';
 import { Table, type TableColumn } from 'panel/common/ui/Table';
 import { Icon } from 'panel/common/ui/Icon';
-import { Dropdown } from 'panel/common/ui/Dropdown';
+import { Tooltip } from 'panel/common/ui/Tooltip';
 import { addSuccessToast } from 'panel/stores/toasts';
 import theme from 'panel/lib/theme';
 
@@ -31,7 +31,7 @@ type Props = {
 
 export const PersistentClientsTable = (props: Props) => {
     const pageSize = createMemo(
-        () => LocalStorageHelper.getItem(LOCAL_STORAGE_KEYS.CLIENTS_PAGE_SIZE) || undefined,
+        () => LocalStorageHelper.getItem<number>(LOCAL_STORAGE_KEYS.CLIENTS_PAGE_SIZE) || undefined,
     );
 
     const handleCopy = (text: string) => {
@@ -51,10 +51,11 @@ export const PersistentClientsTable = (props: Props) => {
                     text: intl.getMessage('client_identifier'),
                     className: s.headerCell,
                 },
-                accessor: (row: Client) => row.ids.filter((id) => id.trim() !== '').join(','),
+                accessor: (row: Client) =>
+                    (row.ids ?? []).filter((id) => id.trim() !== '').join(','),
                 sortable: true,
                 render: (_value: string, row: Client) => {
-                    const { ids } = row;
+                    const ids = row.ids ?? [];
                     // Filter out empty strings — the backend may return trailing empty
                     // entries that would inflate hiddenCount and cause a spurious comma.
                     const nonEmpty = ids.filter((id) => id.trim() !== '');
@@ -73,11 +74,9 @@ export const PersistentClientsTable = (props: Props) => {
                                         {firstId}
                                     </span>
                                     <Show when={hiddenCount > 0}>
-                                        <Dropdown
-                                            trigger="hover"
-                                            noIcon
+                                        <Tooltip
                                             overlayClass={s.idsTooltipOverlay}
-                                            menu={
+                                            content={
                                                 <div class={s.idsTooltip}>
                                                     <For each={nonEmpty}>
                                                         {(id) => (
@@ -104,7 +103,7 @@ export const PersistentClientsTable = (props: Props) => {
                                             }
                                         >
                                             <span class={s.countLabel}>{hiddenCount}</span>
-                                        </Dropdown>
+                                        </Tooltip>
                                     </Show>
                                 </div>
                             </div>
@@ -125,11 +124,9 @@ export const PersistentClientsTable = (props: Props) => {
                         <span class={theme.table.cellLabel}>{intl.getMessage('name')}</span>
 
                         <div class={theme.table.cellValueText}>
-                            <Dropdown
-                                trigger="hover"
-                                noIcon
+                            <Tooltip
                                 overlayClass={s.nameTooltipOverlay}
-                                menu={
+                                content={
                                     <div class={s.nameTooltip}>
                                         <span class={s.nameTooltipText}>{value}</span>
                                         <button
@@ -142,13 +139,12 @@ export const PersistentClientsTable = (props: Props) => {
                                         </button>
                                     </div>
                                 }
-                                class={s.nameDropdown}
-                                childrenClass={s.nameDropdownInner}
+                                class={s.nameDropdownInner}
                             >
-                                <span class={cn(theme.common.textOverflow, s.nameTrigger)}>
+                                <span class={cn(theme.common.twoRowsOverflow, s.nameTrigger)}>
                                     {value}
                                 </span>
-                            </Dropdown>
+                            </Tooltip>
                         </div>
                     </div>
                 ),
@@ -201,7 +197,7 @@ export const PersistentClientsTable = (props: Props) => {
                     text: intl.getMessage('upstreams'),
                     className: s.headerCell,
                 },
-                accessor: (row: Client) => row.upstreams.length > 0,
+                accessor: (row: Client) => (row.upstreams ?? []).length > 0,
                 sortable: true,
                 render: (_value: boolean, row: Client) => (
                     <div class={theme.table.cell}>
@@ -209,7 +205,7 @@ export const PersistentClientsTable = (props: Props) => {
 
                         <div class={theme.table.cellValueText}>
                             <span class={theme.common.textOverflow}>
-                                {row.upstreams.length > 0
+                                {(row.upstreams ?? []).length > 0
                                     ? intl.getMessage('settings_custom')
                                     : intl.getMessage('settings_global')}
                             </span>
@@ -223,10 +219,10 @@ export const PersistentClientsTable = (props: Props) => {
                     text: intl.getMessage('tags_title'),
                     className: s.headerCell,
                 },
-                accessor: (row: Client) => row.tags.join(','),
+                accessor: (row: Client) => (row.tags ?? []).join(','),
                 sortable: true,
                 render: (_value: string, row: Client) => (
-                    <TagCell tags={row.tags} onCopy={handleCopy} />
+                    <TagCell tags={row.tags ?? []} onCopy={handleCopy} />
                 ),
             },
             {
@@ -235,7 +231,8 @@ export const PersistentClientsTable = (props: Props) => {
                     text: intl.getMessage('requests_table_header'),
                     className: s.headerCell,
                 },
-                accessor: (row: Client) => props.normalizedTopClients?.configured[row.name] || 0,
+                accessor: (row: Client) =>
+                    props.normalizedTopClients?.configured[row.name ?? ''] || 0,
                 sortable: true,
                 render: (_value: unknown, row: Client) => (
                     <div class={theme.table.cell}>
@@ -246,7 +243,7 @@ export const PersistentClientsTable = (props: Props) => {
                         <div class={theme.table.cellValueText}>
                             <span class={theme.common.textOverflow}>
                                 {(
-                                    props.normalizedTopClients?.configured[row.name] || 0
+                                    props.normalizedTopClients?.configured[row.name ?? ''] || 0
                                 ).toLocaleString()}
                             </span>
                         </div>
@@ -283,7 +280,7 @@ export const PersistentClientsTable = (props: Props) => {
 
                                 <button
                                     type="button"
-                                    onClick={() => props.onDelete(row.name)}
+                                    onClick={() => props.onDelete(row.name ?? '')}
                                     disabled={props.deleteDisabled}
                                     class={cn(theme.table.action, theme.table.action_danger)}
                                     title={intl.getMessage('delete_table_action')}
@@ -317,7 +314,7 @@ export const PersistentClientsTable = (props: Props) => {
             loading={props.loading}
             pageSize={pageSize()}
             onPageSizeChange={handlePageSizeChange}
-            getRowId={(row) => row.name}
+            getRowId={(row) => row.name ?? ''}
         />
     );
 };

@@ -41,7 +41,8 @@ export const ListsTable = (props: Props) => {
     const [sortDirection, setSortDirection] = createSignal<'asc' | 'desc'>('asc');
 
     const pageSize = createMemo(
-        () => LocalStorageHelper.getItem(LOCAL_STORAGE_KEYS.BLOCKLIST_PAGE_SIZE) || undefined,
+        () =>
+            LocalStorageHelper.getItem<number>(LOCAL_STORAGE_KEYS.BLOCKLIST_PAGE_SIZE) || undefined,
     );
 
     const sortedFilters = createMemo(() => {
@@ -80,24 +81,21 @@ export const ListsTable = (props: Props) => {
 
     const columns = createMemo<TableColumn<Filter>[]>(() => [
         {
-            key: 'enabled',
+            key: 'name',
             header: {
-                text: '',
+                text: intl.getMessage('name_label'),
                 className: s.headerCell,
             },
-            accessor: 'enabled',
-            sortable: false,
-            width: 64,
-            className: s.cellNameToggleOuter,
-            render: (value: boolean, row: Filter) => {
+            accessor: 'name',
+            sortable: true,
+            render: (value: string, row: Filter) => {
                 const { name, url, enabled } = row;
                 const id = `filter_${url}`;
 
                 return (
                     <div class={theme.table.cell}>
-                        <span class={s.cellNameLabel}>{name}</span>
-
-                        <div class={s.cellValueToggle}>
+                        <div class={cn(theme.table.cellValueText, s.domainCellValue)}>
+                            <span class={theme.common.twoRowsOverflow}>{value}</span>
                             <Switch
                                 id={id}
                                 checked={enabled}
@@ -108,25 +106,6 @@ export const ListsTable = (props: Props) => {
                     </div>
                 );
             },
-        },
-        {
-            key: 'name',
-            header: {
-                text: intl.getMessage('name_label'),
-                className: s.headerCell,
-            },
-            accessor: 'name',
-            sortable: true,
-            className: s.nameDesktopOnly,
-            render: (value: string) => (
-                <div class={theme.table.cell}>
-                    <span class={theme.table.cellLabel}>{intl.getMessage('name_label')}</span>
-
-                    <div class={theme.table.cellValueText}>
-                        <span class={theme.common.textOverflow}>{value}</span>
-                    </div>
-                </div>
-            ),
         },
         {
             key: 'url',

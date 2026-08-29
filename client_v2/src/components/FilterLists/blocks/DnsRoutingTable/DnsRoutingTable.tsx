@@ -28,7 +28,8 @@ export const DnsRoutingTable = (props: Props) => {
     const [sortDirection, setSortDirection] = createSignal<'asc' | 'desc'>('asc');
 
     const pageSize = createMemo(
-        () => LocalStorageHelper.getItem(LOCAL_STORAGE_KEYS.DNS_ROUTING_PAGE_SIZE) || undefined,
+        () =>
+            LocalStorageHelper.getItem<number>(LOCAL_STORAGE_KEYS.DNS_ROUTING_PAGE_SIZE) || undefined,
     );
 
     const sortedSources = createMemo(() => {

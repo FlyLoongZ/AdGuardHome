@@ -15,12 +15,10 @@ const mocks = vi.hoisted(() => ({
     addErrorToast: vi.fn(),
 }));
 
-vi.mock('panel/api/Api', () => ({
-    apiClient: {
-        setRules: mocks.apiSetRules,
-        addFilter: mocks.apiAddFilter,
-        getFilteringStatus: mocks.apiGetFilteringStatus,
-    },
+vi.mock('panel/api/generated', () => ({
+        filteringSetRules: mocks.apiSetRules,
+        filteringAddURL: mocks.apiAddFilter,
+        filteringStatus: mocks.apiGetFilteringStatus,
 }));
 
 vi.mock('panel/stores/toasts', () => ({
@@ -31,7 +29,7 @@ vi.mock('panel/stores/toasts', () => ({
 describe('getFilteringStatus', () => {
     beforeEach(() => vi.clearAllMocks());
 
-    it('normalizes filters to camelCase and joins user_rules array (FR-003)', async () => {
+    it('normalizes filters to camelCase and joins user_rules array', async () => {
         mocks.apiGetFilteringStatus.mockResolvedValue({
             enabled: true,
             interval: 24,
@@ -68,7 +66,7 @@ describe('setRules', () => {
         vi.clearAllMocks();
     });
 
-    it('sends user_rules as a string array (FR-021)', async () => {
+    it('sends user_rules as a string array', async () => {
         const result = await setRules('||fresh.example^\n');
 
         expect(mocks.apiSetRules).toHaveBeenCalledWith({

@@ -20,18 +20,28 @@ import {
     blockDomain,
     unblockDomain,
     blockDomainForClient,
+    disableFilter,
 } from 'panel/stores/filtering';
 import { servicesState, getAllBlockedServices, allowBlockedService } from 'panel/stores/services';
+import {
+    disableSafeBrowsing,
+    disableParental,
+    disableSafeSearch,
+} from 'panel/stores/settings';
+import { deleteRewrite, getRewritesList } from 'panel/stores/rewrites';
+import { openModal } from 'panel/stores/modals';
 import {
     DEFAULT_LOGS_FILTER,
     QUERY_LOG_REASON_FILTER_QUERIES,
     QUERY_LOG_STATUS_FILTER_QUERIES,
+    MODAL_TYPE,
 } from 'panel/helpers/constants';
 import { getLogsUrlParams } from 'panel/helpers/helpers';
 import { RoutePath, linkPathBuilder } from 'panel/components/Routes/Paths';
 
 import { filterLogsByStatus } from './helpers';
-import { LogEntry } from './types';
+import type { NormalizedQueryLogItem, Filter } from 'panel/helpers/helpers';
+import type { RewriteEntry } from 'panel/api/model/rewriteEntry';
 import { Header } from './blocks/Header';
 import { EmptyState, type EmptyStateMode } from './blocks/EmptyState/EmptyState';
 import { LogTable } from './blocks/LogTable';
@@ -39,6 +49,7 @@ import { LogCard } from './blocks/LogCard';
 import { DetailModal } from './blocks/DetailModal';
 import { DisallowDialog } from './blocks/DisallowDialog';
 import { InfiniteScrollTrigger } from './blocks/InfiniteScrollTrigger';
+import { ConfigureRewritesModal } from 'panel/components/FilterLists/blocks/ConfigureRewritesModal/ConfigureRewritesModal';
 
 import s from './QueryLog.module.pcss';
 
@@ -56,9 +67,10 @@ export const QueryLog = () => {
     const navigate = useNavigate();
     const location = useLocation();
 
-    const [selectedEntry, setSelectedEntry] = createSignal<LogEntry | null>(null);
+    const [selectedEntry, setSelectedEntry] = createSignal<NormalizedQueryLogItem | null>(null);
     const [disallowTarget, setDisallowTarget] = createSignal<string | null>(null);
     const [isIncrementalLoad, setIsIncrementalLoad] = createSignal(false);
+    const [rewriteToEdit, setRewriteToEdit] = createSignal<RewriteEntry | undefined>(undefined);
 
     onMount(() => {
         getLogsConfig();
@@ -66,6 +78,7 @@ export const QueryLog = () => {
         getClients();
         getFilteringStatus();
         getAllBlockedServices();
+        getRewritesList();
     });
 
     // Watch location.search for filter changes
@@ -109,7 +122,11 @@ export const QueryLog = () => {
         (dashboardState.clients || []).flatMap(
             (persistentClient: any) => persistentClient.ids ?? [],
         );
-    const visibleLogs = () => filterLogsByStatus(queryLogsState.logs || [], currentStatus());
+    const visibleLogs = () =>
+        filterLogsByStatus(
+            queryLogsState.logs || [],
+            currentStatus(),
+        );
     const emptyStateMode = () => getEmptyStateMode(queryLogsState.enabled, queryLogsState.interval);
     const hasMore = () => !queryLogsState.isEntireLog;
     const logs = () => queryLogsState.logs || [];
@@ -158,6 +175,27 @@ export const QueryLog = () => {
         allowBlockedService(serviceId);
     };
 
+    const handleDisableFilter = (filter: Filter) => {
+        disableFilter(filter);
+    };
+    const handleDisableSafeBrowsing = () => {
+        disableSafeBrowsing();
+    };
+    const handleDisableParental = () => {
+        disableParental();
+    };
+    const handleDisableSafeSearch = () => {
+        disableSafeSearch();
+    };
+    const handleRemoveRewrite = (rewrite: RewriteEntry) => {
+        deleteRewrite(rewrite, { withUndo: true });
+    };
+    const handleEditRewrite = (rewrite: RewriteEntry) => {
+        setRewriteToEdit({ ...rewrite });
+        openModal(MODAL_TYPE.EDIT_REWRITE);
+        handleCloseDetail();
+    };
+
     const handleBlockClient = (domain: string, client: string) => {
         blockDomainForClient(domain, client);
     };
@@ -186,7 +224,7 @@ export const QueryLog = () => {
         setDisallowTarget(null);
     };
 
-    const handleRowClick = (entry: LogEntry) => {
+    const handleRowClick = (entry: NormalizedQueryLogItem) => {
         setSelectedEntry(entry);
     };
 
@@ -325,8 +363,20 @@ export const QueryLog = () => {
                         onBlock={handleBlockDomain}
                         onAddToAllowlist={handleUnblockDomain}
                         onAllowService={handleAllowService}
+                        onDisableFilter={handleDisableFilter}
+                        onDisableSafeBrowsing={handleDisableSafeBrowsing}
+                        onDisableParental={handleDisableParental}
+                        onDisableSafeSearch={handleDisableSafeSearch}
+                        onRemoveRewrite={handleRemoveRewrite}
+                        onEditRewrite={handleEditRewrite}
                     />
                 </Show>
+
+                <ConfigureRewritesModal
+                    modalId={MODAL_TYPE.EDIT_REWRITE}
+                    rewriteToEdit={rewriteToEdit()}
+                    onClose={() => setRewriteToEdit(undefined)}
+                />
 
                 <Show when={disallowTarget()}>
                     <DisallowDialog

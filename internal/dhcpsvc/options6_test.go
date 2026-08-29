@@ -11,31 +11,67 @@ import (
 	"github.com/gopacket/gopacket/layers"
 )
 
+// defaultOptPref is a default DHCPv6 Preference (7) option with preference
+// value set to 0.
+var defaultOptPref = layers.NewDHCPv6Option(layers.DHCPv6OptPreference, []byte{0})
+
+// defaultOptSolMaxRT creates a DHCPv6 Solicit Message Maximum Retransmission
+// Time (80) option with maxRT value set to [dhcpsvc.DefaultSolMaxRT].
+var defaultOptSolMaxRT = layers.NewDHCPv6Option(
+	layers.DHCPv6OptSolMaxRt,
+	binary.BigEndian.AppendUint32(nil, uint32(dhcpsvc.DefaultSolMaxRT.Seconds())),
+)
+
+// newOptStatusCode creates a top-level DHCPv6 Status Code option.
+func newOptStatusCode(tb testing.TB, status layers.DHCPv6StatusCode) (opt layers.DHCPv6Option) {
+	tb.Helper()
+
+	const (
+		statusCodeLen = 2
+	)
+
+	data := make([]byte, 0, statusCodeLen)
+	data = binary.BigEndian.AppendUint16(data, uint16(status))
+
+	return layers.NewDHCPv6Option(layers.DHCPv6OptStatusCode, data)
+}
+
 // newOptIANA creates a DHCPv6 Identity Association for Non-temporary Address
 // (3) option containing an IA Address with the specified IAID and requested IP
-// address.  reqIP must be a valid IPv6 address.  The option will have the T1
-// and T2 values set to the recommended values based on the [testLeaseTTL]
-// constant, see the RFC reference in the
-// [dhcpsvc.DHCPServer.newDHCPInterfaceV6].
-func newOptIANA(tb testing.TB, iaid uint32, reqIP netip.Addr) (opt layers.DHCPv6Option) {
+// address.  The option will have the T1 and T2 values set to the recommended
+// values based on ttl, see the RFC reference in the
+// [dhcpsvc.DHCPServer.newDHCPInterfaceV6].  reqIP must be a valid IPv6 address.
+func newOptIANA(
+	tb testing.TB,
+	iaid uint32,
+	reqIP netip.Addr,
+	ttl time.Duration,
+) (opt layers.DHCPv6Option) {
 	tb.Helper()
 
 	iana := &dhcpsvc.IANAOption{
 		ID: iaid,
 		Nested: []dhcpsvc.IAAddrOption{{
-			PreferredLifetime: testLeaseTTL,
-			ValidLifetime:     testLeaseTTL,
+			PreferredLifetime: ttl,
+			ValidLifetime:     ttl,
 			Addr:              reqIP,
 		}},
-		T1: testLeaseTTL / 2,
-		T2: testLeaseTTL * 4 / 5,
+		T1: ttl / 2,
+		T2: ttl * 4 / 5,
 	}
 
 	return iana.Encode()
 }
 
+// newDefaultOptIANA creates a default DHCPv6 IANA option for tests.
+func newDefaultOptIANA(tb testing.TB, reqIP netip.Addr) (opt layers.DHCPv6Option) {
+	return newOptIANA(tb, testIAID, reqIP, testLeaseTTL)
+}
+
 // newOptIANAStatus creates a DHCPv6 IA_NA (3) option carrying only a nested
-// Status Code option.
+// Status Code option.  If status is [layers.DHCPv6StatusCodeSuccess], the
+// returned option will not contain a nested Status Code option, as per RFC 8415
+// section 21.13.
 func newOptIANAStatus(
 	tb testing.TB,
 	iaid uint32,
@@ -64,33 +100,16 @@ func newOptIANAStatus(
 	data = binary.BigEndian.AppendUint32(data, 0)
 	data = binary.BigEndian.AppendUint32(data, 0)
 
-	// Nested Status Code option.
-	data = binary.BigEndian.AppendUint16(data, uint16(layers.DHCPv6OptStatusCode))
+	if status != layers.DHCPv6StatusCodeSuccess {
+		// Nested Status Code option.
+		data = binary.BigEndian.AppendUint16(data, uint16(layers.DHCPv6OptStatusCode))
 
-	// The length of the Status Code option data is 2 bytes.
-	data = binary.BigEndian.AppendUint16(data, 2)
-	data = binary.BigEndian.AppendUint16(data, uint16(status))
+		// The length of the Status Code option data is 2 bytes.
+		data = binary.BigEndian.AppendUint16(data, 2)
+		data = binary.BigEndian.AppendUint16(data, uint16(status))
+	}
 
 	return layers.NewDHCPv6Option(layers.DHCPv6OptIANA, data)
-}
-
-// newOptPreference creates a DHCPv6 Preference (7) option with the specified
-// preference value.
-func newOptPreference(tb testing.TB, pref uint8) (opt layers.DHCPv6Option) {
-	tb.Helper()
-
-	return layers.NewDHCPv6Option(layers.DHCPv6OptPreference, []byte{pref})
-}
-
-// newOptSolMaxRT creates a DHCPv6 Solicit Message Maximum Retransmission Time
-// (80) option with the specified maxRT value.
-func newOptSolMaxRT(tb testing.TB, maxRT time.Duration) (opt layers.DHCPv6Option) {
-	tb.Helper()
-
-	return layers.NewDHCPv6Option(
-		layers.DHCPv6OptSolMaxRt,
-		binary.BigEndian.AppendUint32(nil, uint32(maxRT.Seconds())),
-	)
 }
 
 // newOptClientDUID creates a DHCPv6 Client Identifier (1) option containing a
@@ -125,4 +144,23 @@ func newOptDUIDLL(
 	}
 
 	return layers.NewDHCPv6Option(code, duid.Encode())
+}
+
+// newWantDHCPv6Opts returns a slice of DHCPv6 options with the specified
+// options and default server and client DUID options.
+func newWantDHCPv6Opts(
+	tb testing.TB,
+	mac net.HardwareAddr,
+	opts ...layers.DHCPv6Option,
+) (want layers.DHCPv6Options) {
+	tb.Helper()
+
+	want = layers.DHCPv6Options{
+		newOptServerDUID(tb, testIfaceHWAddr),
+		newOptClientDUID(tb, mac),
+	}
+
+	want = append(want, opts...)
+
+	return want
 }

@@ -28,11 +28,13 @@ import (
 	"github.com/AdguardTeam/AdGuardHome/internal/aghnet"
 	"github.com/AdguardTeam/AdGuardHome/internal/aghos"
 	"github.com/AdguardTeam/AdGuardHome/internal/aghtest"
+	"github.com/AdguardTeam/AdGuardHome/internal/aghtls"
 	"github.com/AdguardTeam/AdGuardHome/internal/client"
 	"github.com/AdguardTeam/AdGuardHome/internal/filtering"
 	"github.com/AdguardTeam/AdGuardHome/internal/filtering/hashprefix"
 	"github.com/AdguardTeam/AdGuardHome/internal/filtering/safesearch"
 	"github.com/AdguardTeam/AdGuardHome/internal/schedule"
+	"github.com/AdguardTeam/dnsproxy/dnsproxytest"
 	"github.com/AdguardTeam/dnsproxy/proxy"
 	"github.com/AdguardTeam/dnsproxy/upstream"
 	"github.com/AdguardTeam/golibs/logutil/slogutil"
@@ -46,6 +48,9 @@ import (
 
 // testLogger is a logger used in tests.
 var testLogger = slogutil.NewDiscardLogger()
+
+// testTLSManager is an empty TLS config provider for tests.
+var testTLSManager = &aghtls.EmptyManager{}
 
 func TestMain(m *testing.M) {
 	testutil.DiscardLogOutput(m)
@@ -159,6 +164,7 @@ func createTestServer(
 	tb testing.TB,
 	filterConf *filtering.Config,
 	forwardConf ServerConfig,
+	tlsManager aghtls.Manager,
 ) (s *Server) {
 	tb.Helper()
 
@@ -207,6 +213,7 @@ func createTestServer(
 		DNSFilter:   f,
 		PrivateNets: netutil.SubnetSetFunc(netutil.IsLocallyServed),
 		Logger:      testLogger,
+		TLSManager:  tlsManager,
 	})
 	require.NoError(tb, err)
 
@@ -243,6 +250,7 @@ func createServerTLSConfig(tb testing.TB) (*tls.Config, []byte, []byte) {
 		IsCA:                  true,
 	}
 	template.DNSNames = append(template.DNSNames, tlsServerName)
+	template.IPAddresses = append(template.IPAddresses, netutil.IPv4Localhost().AsSlice())
 
 	derBytes, err := x509.CreateCertificate(
 		rand.Reader,
@@ -261,23 +269,33 @@ func createServerTLSConfig(tb testing.TB) (*tls.Config, []byte, []byte) {
 	cert, err := tls.X509KeyPair(certPem, keyPem)
 	require.NoErrorf(tb, err, "failed to create certificate: %s", err)
 
+	getCert := func(chi *tls.ClientHelloInfo) (*tls.Certificate, error) {
+		return &cert, nil
+	}
+
 	return &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		ServerName:   tlsServerName,
-		MinVersion:   tls.VersionTLS12,
+		GetCertificate: getCert,
+		ServerName:     tlsServerName,
+		MinVersion:     tls.VersionTLS12,
 	}, certPem, keyPem
 }
 
-func createTestTLS(tb testing.TB, tlsConf *TLSConfig) (s *Server, certPem []byte) {
+func createTestTLS(tb testing.TB, tlsConf *TLSConfig) (s *Server, tlsManager aghtls.Manager) {
 	tb.Helper()
 
-	var keyPem []byte
-	_, certPem, keyPem = createServerTLSConfig(tb)
+	tlsConfig, certPem, _ := createServerTLSConfig(tb)
 
-	cert, err := tls.X509KeyPair(certPem, keyPem)
-	require.NoError(tb, err)
+	// Add our self-signed generated config to roots.
+	roots := x509.NewCertPool()
+	roots.AppendCertsFromPEM(certPem)
 
-	tlsConf.Cert = &cert
+	tlsConfig.RootCAs = roots
+
+	testTLSManager := &aghtest.Manager{}
+
+	testTLSManager.OnTLSConfig = func() (conf *tls.Config) { return tlsConfig.Clone() }
+	testTLSManager.OnRootCAs = func() (pool *x509.CertPool) { return roots }
+	testTLSManager.OnHasIPAddrs = func() (ok bool) { return true }
 
 	s = createTestServer(
 		tb,
@@ -295,12 +313,13 @@ func createTestTLS(tb testing.TB, tlsConf *TLSConfig) (s *Server, certPem []byte
 			},
 			ServePlainDNS: true,
 		},
+		testTLSManager,
 	)
 
-	err = s.Prepare(testutil.ContextWithTimeout(tb, testTimeout), &s.conf)
+	err := s.Prepare(testutil.ContextWithTimeout(tb, testTimeout), &s.conf)
 	require.NoErrorf(tb, err, "failed to prepare server: %s", err)
 
-	return s, certPem
+	return s, testTLSManager
 }
 
 const googleDomainName = "google-public-dns-a.google.com."
@@ -310,7 +329,7 @@ func createGoogleATestMessage() *dns.Msg {
 }
 
 func newGoogleUpstream() (u upstream.Upstream) {
-	return &aghtest.UpstreamMock{
+	return &dnsproxytest.Upstream{
 		OnAddress: func() (addr string) { return "google.upstream.example" },
 		OnExchange: func(req *dns.Msg) (resp *dns.Msg, err error) {
 			return cmp.Or(
@@ -435,6 +454,7 @@ func TestServer(t *testing.T) {
 			},
 			ServePlainDNS: true,
 		},
+		testTLSManager,
 	)
 	s.conf.UpstreamConfig.Upstreams = []upstream.Upstream{newGoogleUpstream()}
 	startDeferStop(t, s)
@@ -480,8 +500,9 @@ func TestServer_timeout(t *testing.T) {
 		}
 
 		s, err := NewServer(DNSCreateParams{
-			DNSFilter: createTestDNSFilter(t),
-			Logger:    testLogger,
+			DNSFilter:  createTestDNSFilter(t),
+			Logger:     testLogger,
+			TLSManager: testTLSManager,
 		})
 		require.NoError(t, err)
 
@@ -493,8 +514,9 @@ func TestServer_timeout(t *testing.T) {
 
 	t.Run("default", func(t *testing.T) {
 		s, err := NewServer(DNSCreateParams{
-			DNSFilter: createTestDNSFilter(t),
-			Logger:    testLogger,
+			DNSFilter:  createTestDNSFilter(t),
+			Logger:     testLogger,
+			TLSManager: testTLSManager,
 		})
 		require.NoError(t, err)
 
@@ -511,37 +533,11 @@ func TestServer_timeout(t *testing.T) {
 	})
 }
 
-func TestServer_Prepare_fallbacks(t *testing.T) {
-	srvConf := &ServerConfig{
-		TLSConf: &TLSConfig{},
-		Config: Config{
-			FallbackDNS: []string{
-				"#tls://1.1.1.1",
-				"8.8.8.8",
-			},
-			UpstreamMode:     UpstreamModeLoadBalance,
-			EDNSClientSubnet: &EDNSClientSubnet{Enabled: false},
-			ClientsContainer: EmptyClientsContainer{},
-		},
-		ServePlainDNS: true,
-	}
-
-	s, err := NewServer(DNSCreateParams{
-		Logger: testLogger,
-	})
-	require.NoError(t, err)
-
-	err = s.Prepare(testutil.ContextWithTimeout(t, testTimeout), srvConf)
-	require.NoError(t, err)
-	require.NotNil(t, s.dnsProxy.Fallbacks)
-
-	assert.Len(t, s.dnsProxy.Fallbacks.Upstreams, 1)
-}
-
 func TestServer_Reconfigure_RollbackOnPrepareFailure(t *testing.T) {
 	s, err := NewServer(DNSCreateParams{
-		DNSFilter: createTestDNSFilter(t),
-		Logger:    testLogger,
+		DNSFilter:  createTestDNSFilter(t),
+		Logger:     testLogger,
+		TLSManager: testTLSManager,
 	})
 	require.NoError(t, err)
 
@@ -586,8 +582,8 @@ func TestNewSourceManager_LoadsMetadataFromCache(t *testing.T) {
 	conf := &ServerConfig{
 		Config: Config{
 			UpstreamDNSSources: []UpstreamDNSSourceYAML{{
-				Enabled: true,
-				URL:     "https://example.test/source.txt",
+				Enabled:           true,
+				URL:               "https://example.test/source.txt",
 				UpstreamDNSSource: UpstreamDNSSource{ID: 1},
 			}},
 		},
@@ -618,8 +614,8 @@ func TestNewSourceManager_MigratesLegacyCache(t *testing.T) {
 	conf := &ServerConfig{
 		Config: Config{
 			UpstreamDNSSources: []UpstreamDNSSourceYAML{{
-				Enabled: true,
-				URL:     "https://example.test/source.txt",
+				Enabled:           true,
+				URL:               "https://example.test/source.txt",
 				UpstreamDNSSource: UpstreamDNSSource{ID: 1},
 			}},
 		},
@@ -642,8 +638,8 @@ func TestLoadUpstreams_MissingCacheSetsLastError(t *testing.T) {
 		Config: Config{
 			UpstreamDNS: []string{"8.8.8.8"},
 			UpstreamDNSSources: []UpstreamDNSSourceYAML{{
-				Enabled: true,
-				URL:     "https://example.test/missing.txt",
+				Enabled:           true,
+				URL:               "https://example.test/missing.txt",
 				UpstreamDNSSource: UpstreamDNSSource{ID: 7},
 			}},
 		},
@@ -793,7 +789,7 @@ func TestApplyUpstreamSourceStage_ReconfigureFailureReloadsAfterRollback(t *test
 		ServePlainDNS:  true,
 		UDPListenAddrs: []*net.UDPAddr{},
 		TCPListenAddrs: []*net.TCPAddr{},
-	})
+	}, testTLSManager)
 
 	oldCache, err := os.ReadFile(cachePath)
 	require.NoError(t, err)
@@ -1150,6 +1146,7 @@ func TestServerWithProtectionDisabled(t *testing.T) {
 			},
 			ServePlainDNS: true,
 		},
+		testTLSManager,
 	)
 
 	s.conf.UpstreamConfig.Upstreams = []upstream.Upstream{newGoogleUpstream()}
@@ -1166,20 +1163,13 @@ func TestServerWithProtectionDisabled(t *testing.T) {
 }
 
 func TestDoTServer(t *testing.T) {
-	s, certPem := createTestTLS(t, &TLSConfig{
+	s, tlsConfProvider := createTestTLS(t, &TLSConfig{
 		TLSListenAddrs: []*net.TCPAddr{{}},
 	})
 	s.conf.UpstreamConfig.Upstreams = []upstream.Upstream{newGoogleUpstream()}
 	startDeferStop(t, s)
 
-	// Add our self-signed generated config to roots.
-	roots := x509.NewCertPool()
-	roots.AppendCertsFromPEM(certPem)
-	tlsConfig := &tls.Config{
-		ServerName: tlsServerName,
-		RootCAs:    roots,
-		MinVersion: tls.VersionTLS12,
-	}
+	tlsConfig := tlsConfProvider.TLSConfig()
 
 	// Create a DNS-over-TLS client connection.
 	addr := s.dnsProxy.Addr(proxy.ProtoTLS)
@@ -1234,7 +1224,7 @@ func TestServerRace(t *testing.T) {
 		ConfModifier:  agh.EmptyConfigModifier{},
 		ServePlainDNS: true,
 	}
-	s := createTestServer(t, filterConf, forwardConf)
+	s := createTestServer(t, filterConf, forwardConf, testTLSManager)
 	s.conf.UpstreamConfig.Upstreams = []upstream.Upstream{newGoogleUpstream()}
 	startDeferStop(t, s)
 
@@ -1289,14 +1279,16 @@ func TestSafeSearch(t *testing.T) {
 		},
 		ServePlainDNS: true,
 	}
-	s := createTestServer(t, filterConf, forwardConf)
+	s := createTestServer(t, filterConf, forwardConf, testTLSManager)
 
 	pt := testutil.NewPanicT(t)
-	ups := aghtest.NewUpstreamMock(func(req *dns.Msg) (resp *dns.Msg, err error) {
+	ups := aghtest.NewUpstream()
+	ups.OnExchange = func(req *dns.Msg) (resp *dns.Msg, err error) {
 		assert.Equal(pt, googleSafeSearch, req.Question[0].Name)
 
 		return aghtest.MatchedResponse(req, dns.TypeA, googleSafeSearch, "1.2.3.4"), nil
-	})
+	}
+
 	s.conf.UpstreamConfig.Upstreams = []upstream.Upstream{ups}
 
 	startDeferStop(t, s)
@@ -1385,6 +1377,7 @@ func TestInvalidRequest(t *testing.T) {
 			},
 			ServePlainDNS: true,
 		},
+		testTLSManager,
 	)
 	startDeferStop(t, s)
 
@@ -1425,6 +1418,7 @@ func TestBlockedRequest(t *testing.T) {
 			BlockingMode:      filtering.BlockingModeDefault,
 		},
 		forwardConf,
+		testTLSManager,
 	)
 	startDeferStop(t, s)
 
@@ -1445,7 +1439,7 @@ func TestBlockedRequest(t *testing.T) {
 func TestServerCustomClientUpstream(t *testing.T) {
 	const defaultCacheSize = 1024 * 1024
 
-	var upsCalledCounter uint32
+	var upsCalledCounter atomic.Uint32
 
 	forwardConf := ServerConfig{
 		UDPListenAddrs: []*net.UDPAddr{{}},
@@ -1466,16 +1460,18 @@ func TestServerCustomClientUpstream(t *testing.T) {
 		t,
 		&filtering.Config{BlockingMode: filtering.BlockingModeDefault},
 		forwardConf,
+		testTLSManager,
 	)
 
-	ups := aghtest.NewUpstreamMock(func(req *dns.Msg) (resp *dns.Msg, err error) {
-		atomic.AddUint32(&upsCalledCounter, 1)
+	ups := aghtest.NewUpstream()
+	ups.OnExchange = func(req *dns.Msg) (resp *dns.Msg, err error) {
+		upsCalledCounter.Add(1)
 
 		return cmp.Or(
 			aghtest.MatchedResponse(req, dns.TypeA, "host", "192.168.0.1"),
 			new(dns.Msg).SetRcode(req, dns.RcodeNameError),
 		), nil
-	})
+	}
 
 	customUpsConf := proxy.NewCustomUpstreamConfig(
 		&proxy.UpstreamConfig{
@@ -1509,11 +1505,11 @@ func TestServerCustomClientUpstream(t *testing.T) {
 
 	assert.Equal(t, dns.RcodeSuccess, reply.Rcode)
 	assert.Equal(t, net.IP{192, 168, 0, 1}, reply.Answer[0].(*dns.A).A)
-	assert.Equal(t, uint32(1), atomic.LoadUint32(&upsCalledCounter))
+	assert.Equal(t, uint32(1), upsCalledCounter.Load())
 
 	_, err = dns.Exchange(req, addr)
 	require.NoError(t, err)
-	assert.Equal(t, uint32(1), atomic.LoadUint32(&upsCalledCounter))
+	assert.Equal(t, uint32(1), upsCalledCounter.Load())
 }
 
 // testCNAMEs is a map of names and CNAMEs necessary for the TestUpstream work.
@@ -1545,15 +1541,14 @@ func TestBlockCNAMEProtectionEnabled(t *testing.T) {
 			},
 			ServePlainDNS: true,
 		},
+		testTLSManager,
 	)
-	testUpstm := &aghtest.Upstream{
-		CName: testCNAMEs,
-		IPv4:  testIPv4,
-	}
 
-	s.dnsProxy.UpstreamConfig = &proxy.UpstreamConfig{
-		Upstreams: []upstream.Upstream{testUpstm},
-	}
+	testUpstm := aghtest.NewExchangingUpstream(t, testCNAMEs, testIPv4, nil)
+
+	// TODO(m.kazantsev):  Get rid of this manual assignment of upstreams across
+	// the whole project.
+	s.conf.UpstreamConfig.Upstreams = []upstream.Upstream{testUpstm}
 	startDeferStop(t, s)
 
 	addr := s.dnsProxy.Addr(proxy.ProtoUDP)
@@ -1586,13 +1581,12 @@ func TestBlockCNAME(t *testing.T) {
 		t,
 		&filtering.Config{ProtectionEnabled: true, BlockingMode: filtering.BlockingModeDefault},
 		forwardConf,
+		testTLSManager,
 	)
-	s.conf.UpstreamConfig.Upstreams = []upstream.Upstream{
-		&aghtest.Upstream{
-			CName: testCNAMEs,
-			IPv4:  testIPv4,
-		},
-	}
+
+	ups := aghtest.NewExchangingUpstream(t, testCNAMEs, testIPv4, nil)
+
+	s.conf.UpstreamConfig.Upstreams = []upstream.Upstream{ups}
 	startDeferStop(t, s)
 
 	addr := s.dnsProxy.Addr(proxy.ProtoUDP).String()
@@ -1662,13 +1656,12 @@ func TestClientRulesForCNAMEMatching(t *testing.T) {
 		t,
 		&filtering.Config{BlockingMode: filtering.BlockingModeDefault},
 		forwardConf,
+		testTLSManager,
 	)
-	s.conf.UpstreamConfig.Upstreams = []upstream.Upstream{
-		&aghtest.Upstream{
-			CName: testCNAMEs,
-			IPv4:  testIPv4,
-		},
-	}
+
+	ups := aghtest.NewExchangingUpstream(t, testCNAMEs, testIPv4, nil)
+
+	s.conf.UpstreamConfig.Upstreams = []upstream.Upstream{ups}
 	startDeferStop(t, s)
 
 	addr := s.dnsProxy.Addr(proxy.ProtoUDP)
@@ -1712,6 +1705,7 @@ func TestNullBlockedRequest(t *testing.T) {
 		t,
 		&filtering.Config{ProtectionEnabled: true, BlockingMode: filtering.BlockingModeNullIP},
 		forwardConf,
+		testTLSManager,
 	)
 	startDeferStop(t, s)
 	addr := s.dnsProxy.Addr(proxy.ProtoUDP)
@@ -1767,6 +1761,7 @@ func TestNOERRORBlockedRequest(t *testing.T) {
 		t,
 		&filtering.Config{ProtectionEnabled: true, BlockingMode: filtering.BlockingModeNOERROR},
 		forwardConf,
+		testTLSManager,
 	)
 	startDeferStop(t, s)
 	addr := s.dnsProxy.Addr(proxy.ProtoUDP)
@@ -1828,6 +1823,7 @@ func TestBlockedCustomIP(t *testing.T) {
 		DNSFilter:   f,
 		PrivateNets: netutil.SubnetSetFunc(netutil.IsLocallyServed),
 		Logger:      testLogger,
+		TLSManager:  testTLSManager,
 	})
 	require.NoError(t, err)
 
@@ -1906,6 +1902,7 @@ func TestBlockedByHosts(t *testing.T) {
 		t,
 		&filtering.Config{ProtectionEnabled: true, BlockingMode: filtering.BlockingModeDefault},
 		forwardConf,
+		testTLSManager,
 	)
 	startDeferStop(t, s)
 	addr := s.dnsProxy.Addr(proxy.ProtoUDP)
@@ -1977,7 +1974,7 @@ func TestBlockedBySafeBrowsing(t *testing.T) {
 		},
 		ServePlainDNS: true,
 	}
-	s := createTestServer(t, filterConf, forwardConf)
+	s := createTestServer(t, filterConf, forwardConf, testTLSManager)
 	startDeferStop(t, s)
 	addr := s.dnsProxy.Addr(proxy.ProtoUDP)
 
@@ -2037,6 +2034,7 @@ func TestRewrite(t *testing.T) {
 		DNSFilter:   f,
 		PrivateNets: netutil.SubnetSetFunc(netutil.IsLocallyServed),
 		Logger:      testLogger,
+		TLSManager:  testTLSManager,
 	})
 	require.NoError(t, err)
 
@@ -2055,12 +2053,14 @@ func TestRewrite(t *testing.T) {
 		ServePlainDNS: true,
 	}))
 
-	ups := aghtest.NewUpstreamMock(func(req *dns.Msg) (resp *dns.Msg, err error) {
+	ups := aghtest.NewUpstream()
+	ups.OnExchange = func(req *dns.Msg) (resp *dns.Msg, err error) {
 		return cmp.Or(
 			aghtest.MatchedResponse(req, dns.TypeA, "example.org", "4.3.2.1"),
 			new(dns.Msg).SetRcode(req, dns.RcodeNameError),
 		), nil
-	})
+	}
+
 	s.conf.UpstreamConfig.Upstreams = []upstream.Upstream{ups}
 	startDeferStop(t, s)
 
@@ -2173,6 +2173,7 @@ func TestPTRResponseFromDHCPLeases(t *testing.T) {
 		PrivateNets: netutil.SubnetSetFunc(netutil.IsLocallyServed),
 		Logger:      testLogger,
 		LocalDomain: localDomain,
+		TLSManager:  testTLSManager,
 	})
 	require.NoError(t, err)
 
@@ -2226,10 +2227,10 @@ func TestPTRResponseFromHosts(t *testing.T) {
 		OnHostByIP: func(ip netip.Addr) (host string) { return "" },
 	}
 
-	var eventsCalledCounter uint32
+	var eventsCalledCounter atomic.Uint32
 	watcher := aghtest.NewFSWatcher()
 	watcher.OnEvents = func() (e <-chan aghos.Event) {
-		assert.Equal(t, uint32(1), atomic.AddUint32(&eventsCalledCounter, 1))
+		assert.Equal(t, uint32(1), eventsCalledCounter.Add(1))
 
 		return nil
 	}
@@ -2243,7 +2244,7 @@ func TestPTRResponseFromHosts(t *testing.T) {
 	hc, err := aghnet.NewHostsContainer(ctx, testLogger, testFS, watcher, hostsFilename)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		assert.Equal(t, uint32(1), atomic.LoadUint32(&eventsCalledCounter))
+		assert.Equal(t, uint32(1), eventsCalledCounter.Load())
 	})
 
 	flt, err := filtering.New(&filtering.Config{
@@ -2263,6 +2264,7 @@ func TestPTRResponseFromHosts(t *testing.T) {
 		DNSFilter:   flt,
 		PrivateNets: netutil.SubnetSetFunc(netutil.IsLocallyServed),
 		Logger:      testLogger,
+		TLSManager:  testTLSManager,
 	})
 	require.NoError(t, err)
 
@@ -2552,6 +2554,7 @@ func TestServer_Exchange(t *testing.T) {
 					UsePrivateRDNS:    true,
 					ServePlainDNS:     true,
 				},
+				testTLSManager,
 			)
 
 			ctx := testutil.ContextWithTimeout(t, testTimeout)
@@ -2580,6 +2583,7 @@ func TestServer_Exchange(t *testing.T) {
 				LocalPTRResolvers: []string{},
 				ServePlainDNS:     true,
 			},
+			testTLSManager,
 		)
 
 		ctx := testutil.ContextWithTimeout(t, testTimeout)

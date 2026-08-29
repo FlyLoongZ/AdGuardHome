@@ -1,15 +1,15 @@
 import { Show, For, createMemo } from 'solid-js';
 import cn from 'clsx';
-
-import { useIsDesktop } from 'panel/helpers/useMediaQuery';
-import { MOBILE_TABLE_MAX_ROWS } from 'panel/helpers/constants';
 import intl from 'panel/common/intl';
 import { Icon } from 'panel/common/ui/Icon';
-import { Dropdown } from 'panel/common/ui/Dropdown';
-import { formatNumber, formatCompactNumber } from 'panel/helpers/helpers';
+import { Tooltip } from 'panel/common/ui/Tooltip';
+import { QueriesTooltip } from 'panel/common/ui/QueriesTooltip';
+import { Link } from 'panel/common/ui/Link';
+import { RoutePath } from 'panel/components/Routes/Paths';
+import { formatCompactNumber } from 'panel/helpers/helpers';
 import theme from 'panel/lib/theme';
 import { getTrackerData } from 'panel/helpers/trackers/trackers';
-import { SortableTableHeader } from '../SortableTableHeader';
+import { TableHeader } from '../TableHeader';
 import { TrackerTooltip } from '../TrackerTooltip';
 import { EmptyState } from '../EmptyState';
 import { useSortedData } from '../../hooks/useSortedData';
@@ -27,16 +27,7 @@ type Props = {
 };
 
 export const TopBlockedDomains = (props: Props) => {
-    const isDesktop = useIsDesktop();
-    const {
-        sortedData: sortedDomains,
-        sortField,
-        sortDirection,
-        handleSort,
-    } = useSortedData(() => props.topBlockedDomains);
-    const visibleDomains = createMemo(() =>
-        isDesktop() ? sortedDomains() : sortedDomains().slice(0, MOBILE_TABLE_MAX_ROWS),
-    );
+    const { sortedData: sortedDomains } = useSortedData(() => props.topBlockedDomains);
 
     const hasStats = createMemo(() => props.topBlockedDomains.length > 0);
 
@@ -57,18 +48,15 @@ export const TopBlockedDomains = (props: Props) => {
             </div>
 
             <Show when={hasStats()}>
-                <SortableTableHeader
+                <TableHeader
                     nameLabel={intl.getMessage('domain')}
                     countLabel={intl.getMessage('blocked_queries')}
-                    sortField={sortField()}
-                    sortDirection={sortDirection()}
-                    onSort={handleSort}
                 />
             </Show>
 
             <div class={s.tableRows}>
                 <Show when={hasStats()} fallback={<EmptyState />}>
-                    <For each={visibleDomains()}>
+                    <For each={sortedDomains()}>
                         {(domain) => {
                             const percent = createMemo(() =>
                                 props.numBlockedFiltering > 0
@@ -90,33 +78,22 @@ export const TopBlockedDomains = (props: Props) => {
                                             when={trackerData}
                                             fallback={<div class={s.tableRowDot} />}
                                         >
-                                            <Dropdown
-                                                menu={<TrackerTooltip trackerData={trackerData!} />}
-                                                trigger="hover"
+                                            <Tooltip
+                                                content={
+                                                    <TrackerTooltip trackerData={trackerData!} />
+                                                }
                                                 position="bottomLeft"
-                                                noIcon
+                                                class={theme.common.noShrink}
                                             >
                                                 <Icon icon="eye_open" class={s.tableRowIcon} />
-                                            </Dropdown>
+                                            </Tooltip>
                                         </Show>
                                         <span class={s.domainName}>{domain.name}</span>
                                     </div>
 
                                     <div class={s.tableRowRight}>
                                         <div class={s.dropdowWrapper}>
-                                            <Dropdown
-                                                trigger="hover"
-                                                position="top"
-                                                noIcon
-                                                disableAnimation
-                                                overlayClass={s.queryTooltipOverlay}
-                                                menu={
-                                                    <div class={s.queryTooltip}>
-                                                        {formatNumber(domain.count)}{' '}
-                                                        {intl.getMessage('queries').toLowerCase()}
-                                                    </div>
-                                                }
-                                            >
+                                            <QueriesTooltip count={domain.count}>
                                                 <div
                                                     class={cn(
                                                         theme.text.t3,
@@ -124,7 +101,17 @@ export const TopBlockedDomains = (props: Props) => {
                                                         s.queryCount,
                                                     )}
                                                 >
-                                                    {formatCompactNumber(domain.count)}
+                                                    <Link
+                                                        to={RoutePath.QueryLog}
+                                                        query={{ search: `"${domain.name}"` }}
+                                                        class={cn(
+                                                            theme.text.t3,
+                                                            theme.text.condenced,
+                                                            s.queryCountLink,
+                                                        )}
+                                                    >
+                                                        {formatCompactNumber(domain.count)}
+                                                    </Link>
 
                                                     <div
                                                         class={cn(
@@ -136,7 +123,7 @@ export const TopBlockedDomains = (props: Props) => {
                                                         ({percent().toFixed(2)}%)
                                                     </div>
                                                 </div>
-                                            </Dropdown>
+                                            </QueriesTooltip>
                                         </div>
 
                                         <div class={s.queryBar}>

@@ -8,7 +8,7 @@ import theme from 'panel/lib/theme';
 import { setFiltersConfig, filteringState } from 'panel/stores/filtering';
 import { ModalWrapper } from 'panel/common/ui/ModalWrapper';
 import { MODAL_TYPE } from 'panel/helpers/constants';
-import { closeModal } from 'panel/stores/modals';
+import { closeModal, modalsState } from 'panel/stores/modals';
 import { FilterIntervalInput, FILTER_INTERVAL_RANGE } from './FilterIntervalInput';
 
 export const FILTER_INTERVALS = {
@@ -36,15 +36,15 @@ const getIntervalTitle = (interval: number) => {
     }
 };
 
-const RADIO_OPTIONS = [
-    { text: getIntervalTitle(FILTER_INTERVALS.DISABLE), value: FILTER_INTERVALS.DISABLE },
-    { text: getIntervalTitle(FILTER_INTERVALS.HOURLY), value: FILTER_INTERVALS.HOURLY },
-    { text: getIntervalTitle(FILTER_INTERVALS.DAILY), value: FILTER_INTERVALS.DAILY },
-    { text: getIntervalTitle(FILTER_INTERVALS.WEEKLY), value: FILTER_INTERVALS.WEEKLY },
-    { text: getIntervalTitle(FILTER_INTERVALS.CUSTOM), value: FILTER_INTERVALS.CUSTOM },
-];
-
 export const FilterUpdateModal = () => {
+    const getRadioOptions = createMemo(() => [
+        { text: getIntervalTitle(FILTER_INTERVALS.DISABLE), value: FILTER_INTERVALS.DISABLE },
+        { text: getIntervalTitle(FILTER_INTERVALS.HOURLY), value: FILTER_INTERVALS.HOURLY },
+        { text: getIntervalTitle(FILTER_INTERVALS.DAILY), value: FILTER_INTERVALS.DAILY },
+        { text: getIntervalTitle(FILTER_INTERVALS.WEEKLY), value: FILTER_INTERVALS.WEEKLY },
+        { text: getIntervalTitle(FILTER_INTERVALS.CUSTOM), value: FILTER_INTERVALS.CUSTOM },
+    ]);
+
     const PREDEFINED_INTERVALS: number[] = [
         FILTER_INTERVALS.DISABLE,
         FILTER_INTERVALS.HOURLY,
@@ -65,6 +65,7 @@ export const FilterUpdateModal = () => {
     );
 
     createEffect(() => {
+        if (modalsState.modalId !== MODAL_TYPE.FILTER_UPDATE) return;
         const currentInterval = filteringState.interval;
         const custom = currentInterval != null && !PREDEFINED_INTERVALS.includes(currentInterval);
         setIntervalValue(custom ? FILTER_INTERVALS.CUSTOM : (currentInterval ?? 24));
@@ -118,7 +119,7 @@ export const FilterUpdateModal = () => {
                         <Radio
                             name="interval"
                             value={intervalValue()}
-                            options={RADIO_OPTIONS}
+                            options={getRadioOptions()}
                             handleChange={(value: number) => setIntervalValue(value)}
                             disabled={filteringState.processingSetConfig}
                         />

@@ -7,32 +7,33 @@ export const LOCAL_STORAGE_KEYS = {
     DNS_ROUTING_PAGE_SIZE: 'dns_routing_page_size',
     AUTO_CLIENTS_PAGE_SIZE: 'auto_clients_page_size',
     LANGUAGE: 'language',
+    STATS_PERIOD: 'stats_period',
 };
 
 export const LocalStorageHelper = {
-    setItem(key: any, value: any) {
+    setItem(key: string, value: unknown) {
         try {
             localStorage.setItem(key, JSON.stringify(value));
         } catch (error) {
-            console.error(`Error setting ${key} in local storage: ${error.message}`);
+            console.error(`Error setting ${key} in local storage: ${(error as Error).message}`);
         }
     },
 
-    getItem(key: any) {
+    getItem<T = unknown>(key: string): T | null {
         try {
             const item = localStorage.getItem(key);
-            return item ? JSON.parse(item) : null;
+            return item ? (JSON.parse(item) as T) : null;
         } catch (error) {
-            console.error(`Error getting ${key} from local storage: ${error.message}`);
+            console.error(`Error getting ${key} from local storage: ${(error as Error).message}`);
             return null;
         }
     },
 
-    removeItem(key: any) {
+    removeItem(key: string) {
         try {
             localStorage.removeItem(key);
         } catch (error) {
-            console.error(`Error removing ${key} from local storage: ${error.message}`);
+            console.error(`Error removing ${key} from local storage: ${(error as Error).message}`);
         }
     },
 
@@ -40,7 +41,7 @@ export const LocalStorageHelper = {
         try {
             localStorage.clear();
         } catch (error) {
-            console.error(`Error clearing local storage: ${error.message}`);
+            console.error(`Error clearing local storage: ${(error as Error).message}`);
         }
     },
 };

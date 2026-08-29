@@ -1,9 +1,21 @@
 import { createStore } from 'solid-js/store';
 import { untrack } from 'solid-js';
-import { apiClient } from 'panel/api/Api';
-import { addErrorToast, addSuccessToast } from './toasts';
+import {
+    safebrowsingStatus,
+    safebrowsingEnable,
+    safebrowsingDisable,
+    parentalStatus,
+    parentalEnable,
+    parentalDisable,
+    safesearchStatus,
+    safesearchSettings,
+    testUpstreamDNS,
+} from 'panel/api/generated';
+import { addErrorToast, addSuccessToast, createUndoToast } from './toasts';
 import { splitByNewLine } from 'panel/helpers/helpers';
 import intl from 'panel/common/intl';
+import type { SafeSearchConfig } from 'panel/api/model/safeSearchConfig';
+import type { UpstreamsConfig } from 'panel/api/model/upstreamsConfig';
 
 type SettingsState = {
     processing: boolean;
@@ -12,7 +24,7 @@ type SettingsState = {
     settingsList: {
         parental: { enabled: boolean };
         safebrowsing: { enabled: boolean };
-        safesearch: Record<string, boolean>;
+        safesearch: SafeSearchConfig;
     };
 };
 
@@ -32,16 +44,13 @@ const [state, setState] = createStore<SettingsState>(initialState);
 export const initSettings = async () => {
     setState('processing', true);
     try {
-        const [safebrowsingStatus, parentalStatus, safesearchStatus] = await Promise.all([
-            apiClient.getSafebrowsingStatus(),
-            apiClient.getParentalStatus(),
-            apiClient.getSafesearchStatus(),
-        ]);
+        const [safebrowsingStatusData, parentalStatusData, safesearchStatusData] =
+            await Promise.all([safebrowsingStatus(), parentalStatus(), safesearchStatus()]);
         setState({
             settingsList: {
-                safebrowsing: { enabled: safebrowsingStatus.enabled },
-                parental: { enabled: parentalStatus.enabled },
-                safesearch: { ...safesearchStatus },
+                safebrowsing: { enabled: safebrowsingStatusData.enabled },
+                parental: { enabled: parentalStatusData.enabled },
+                safesearch: { ...safesearchStatusData },
             },
             processing: false,
         });
@@ -51,28 +60,39 @@ export const initSettings = async () => {
     }
 };
 
-export const toggleSetting = async (settingKey: string, status: any) => {
+export async function toggleSetting(
+    settingKey: 'safesearch',
+    status: SafeSearchConfig,
+): Promise<boolean>;
+export async function toggleSetting(
+    settingKey: 'safebrowsing' | 'parental',
+    status: boolean,
+): Promise<boolean>;
+export async function toggleSetting(
+    settingKey: string,
+    status: boolean | SafeSearchConfig,
+): Promise<boolean> {
     try {
         switch (settingKey) {
             case 'safebrowsing':
                 if (status) {
-                    await apiClient.disableSafebrowsing();
+                    await safebrowsingDisable();
                 } else {
-                    await apiClient.enableSafebrowsing();
+                    await safebrowsingEnable();
                 }
                 setState('settingsList', 'safebrowsing', 'enabled', !status);
                 return true;
             case 'parental':
                 if (status) {
-                    await apiClient.disableParentalControl();
+                    await parentalDisable();
                 } else {
-                    await apiClient.enableParentalControl();
+                    await parentalEnable();
                 }
                 setState('settingsList', 'parental', 'enabled', !status);
                 return true;
             case 'safesearch':
-                await apiClient.updateSafesearch(status);
-                setState('settingsList', 'safesearch', status);
+                await safesearchSettings(status as SafeSearchConfig);
+                setState('settingsList', 'safesearch', status as SafeSearchConfig);
                 return true;
             default:
                 return false;
@@ -81,9 +101,71 @@ export const toggleSetting = async (settingKey: string, status: any) => {
         addErrorToast({ error });
         return false;
     }
-};
+}
 
 export const settingsState = untrack(() => state);
+
+const disableWithUndo = async (
+    disable: () => Promise<void>,
+    enable: () => Promise<void>,
+    setEnabled: (enabled: boolean) => void,
+    message: string,
+): Promise<boolean> => {
+    try {
+        await disable();
+        setEnabled(false);
+        addSuccessToast(
+            createUndoToast(message, intl.getMessage('notify_undo'), async () => {
+                await enable();
+                setEnabled(true);
+            }),
+        );
+        return true;
+    } catch (error) {
+        addErrorToast({ error });
+        return false;
+    }
+};
+
+export const disableSafeBrowsing = () =>
+    disableWithUndo(
+        safebrowsingDisable,
+        safebrowsingEnable,
+        (enabled) => setState('settingsList', 'safebrowsing', 'enabled', enabled),
+        intl.getMessage('user_rules_browsing_security_disabled'),
+    );
+
+export const disableParental = () =>
+    disableWithUndo(
+        parentalDisable,
+        parentalEnable,
+        (enabled) => setState('settingsList', 'parental', 'enabled', enabled),
+        intl.getMessage('user_rules_parental_control_disabled'),
+    );
+
+export const disableSafeSearch = async (): Promise<boolean> => {
+    // Snapshot as a plain object: store reads return live proxies, so keeping
+    // a reference would reflect post-disable state instead of the original.
+    const previousConfig = { ...state.settingsList.safesearch };
+    try {
+        await safesearchSettings({ ...previousConfig, enabled: false });
+        setState('settingsList', 'safesearch', { ...previousConfig, enabled: false });
+        addSuccessToast(
+            createUndoToast(
+                intl.getMessage('user_rules_safe_search_disabled'),
+                intl.getMessage('notify_undo'),
+                async () => {
+                    await safesearchSettings(previousConfig);
+                    setState('settingsList', 'safesearch', previousConfig);
+                },
+            ),
+        );
+        return true;
+    } catch (error) {
+        addErrorToast({ error });
+        return false;
+    }
+};
 
 export const testUpstreamWithFormValues = async (
     formValues: {
@@ -102,16 +184,23 @@ export const testUpstreamWithFormValues = async (
             lines.filter((line) => !line.startsWith('#') && !line.startsWith('!'));
         const removeComments = (text: string) => filterOutComments(splitByNewLine(text));
 
-        const config: any = {
+        const config: UpstreamsConfig = {
             bootstrap_dns: splitByNewLine(bootstrap_dns),
             private_upstream: splitByNewLine(local_ptr_upstreams),
             fallback_dns: splitByNewLine(fallback_dns),
             ...(upstreamDnsFile ? null : { upstream_dns: removeComments(upstream_dns) }),
         };
 
-        const upstreamResponse = await apiClient.testUpstream(config);
-        const testMessages = Object.keys(upstreamResponse).map((key) => {
-            const message = upstreamResponse[key];
+        const upstreamResponse = await testUpstreamDNS(config);
+        const statuses = Object.values(upstreamResponse || {}).flatMap((group) =>
+            group && typeof group === 'object'
+                ? Object.keys(group).map((key) => ({
+                      key,
+                      message: group[key],
+                  }))
+                : [],
+        );
+        const testMessages = statuses.map(({ key, message }) => {
             if (message.startsWith('WARNING:')) {
                 addErrorToast({
                     error: intl.getMessage('dns_test_warning_toast', { key }),

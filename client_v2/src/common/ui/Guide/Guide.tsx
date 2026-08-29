@@ -16,6 +16,7 @@ type PlatformLayoutProps = {
     serverName?: string;
     portHttps?: number;
     dnsAddresses?: string[];
+    isInstall?: boolean;
 };
 
 type PlatformLayout = {
@@ -26,7 +27,7 @@ type PlatformLayout = {
 
 type PlatformLayouts = Record<string, PlatformLayout>;
 
-const RouterLayout = () => (
+const RouterLayout = (props: PlatformLayoutProps) => (
     <div class={s.guideContent}>
         <div class={s.title}>{intl.getMessage('setup_devices_router_title')}</div>
         <div class={s.guideText}>
@@ -50,11 +51,14 @@ const RouterLayout = () => (
             </ol>
             <div class={s.guideParagraph}>
                 {intl.getMessage('setup_devices_router_desc_2', {
-                    a: (text: string) => (
-                        <A href={Paths.Dhcp} class={s.dnsLink}>
-                            {text}
-                        </A>
-                    ),
+                    a: (text: string) =>
+                        props.isInstall ? (
+                            text
+                        ) : (
+                            <A href={Paths.Dhcp} class={s.dnsLink}>
+                                {text}
+                            </A>
+                        ),
                 })}
             </div>
         </div>
@@ -299,21 +303,26 @@ const getDnsSettingsContent = (
     dnsAddresses: string[] | undefined,
     serverName?: string,
     portHttps?: number,
+    isInstall?: boolean,
 ) => {
     const tlsAddress = dnsAddresses?.filter((addr: string) => addr.includes('tls://')) ?? [];
     const httpsAddress = dnsAddresses?.filter((addr: string) => addr.includes('https://')) ?? [];
     const quicAddress = dnsAddresses?.find((addr: string) => addr.includes('quic://'));
 
-    const showDnsPrivacyNotice = httpsAddress.length < 1 && tlsAddress.length < 1;
+    const showDnsPrivacyNotice =
+        !encryptionState.enabled && httpsAddress.length < 1 && tlsAddress.length < 1;
 
     return showDnsPrivacyNotice ? (
         <div class={s.guideParagraph}>
             {intl.getMessage('setup_dns_notice_new', {
-                a: (text: string) => (
-                    <A href={Paths.Encryption} class={s.dnsLink}>
-                        {text}
-                    </A>
-                ),
+                a: (text: string) =>
+                    isInstall ? (
+                        text
+                    ) : (
+                        <A href={Paths.Encryption} class={s.dnsLink}>
+                            {text}
+                        </A>
+                    ),
             })}
         </div>
     ) : (
@@ -370,7 +379,12 @@ const DnsPrivacyLayout = (props: PlatformLayoutProps) => (
     <div title={intl.getMessage('dns_privacy')}>
         <div class={s.title}>{intl.getMessage('dns_privacy')}</div>
         <div class={s.text}>
-            {getDnsSettingsContent(props.dnsAddresses, props.serverName, props.portHttps)}
+            {getDnsSettingsContent(
+                props.dnsAddresses,
+                props.serverName,
+                props.portHttps,
+                props.isInstall,
+            )}
         </div>
     </div>
 );
@@ -379,7 +393,7 @@ const getPlatformLayouts = (params: PlatformLayoutProps): PlatformLayouts => ({
     Router: {
         title: intl.getMessage('setup_devices_router_title'),
         icon: 'router',
-        component: <RouterLayout />,
+        component: <RouterLayout isInstall={params.isInstall} />,
     },
     Windows: {
         title: intl.getMessage('setup_devices_windows_title'),
@@ -409,6 +423,7 @@ const getPlatformLayouts = (params: PlatformLayoutProps): PlatformLayouts => ({
                 serverName={params.serverName}
                 portHttps={params.portHttps}
                 dnsAddresses={params.dnsAddresses}
+                isInstall={params.isInstall}
             />
         ),
     },
@@ -416,11 +431,12 @@ const getPlatformLayouts = (params: PlatformLayoutProps): PlatformLayouts => ({
 
 type Props = {
     dnsAddresses?: string[];
+    isInstall?: boolean;
 };
 
 export const Guide = (props: Props) => {
     const serverName = () => encryptionState.server_name;
-    const portHttps = () => encryptionState.port_https;
+    const portHttps = () => Number(encryptionState.port_https) || 0;
 
     const [activeTabLabel, setActiveTabLabel] = createSignal('Router');
 
@@ -429,6 +445,7 @@ export const Guide = (props: Props) => {
             serverName: serverName(),
             portHttps: portHttps(),
             dnsAddresses: props.dnsAddresses,
+            isInstall: props.isInstall,
         });
 
     const selectOptions = createMemo(() =>

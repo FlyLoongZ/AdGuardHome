@@ -24,7 +24,12 @@ import { LogsConfig } from './LogsConfig';
 import { FiltersConfig } from './FiltersConfig';
 import { SafeSearchModal } from './SafeSearchModal';
 import { IgnoredDomainsModal } from './IgnoredDomainsModal';
-import { getRetentionSummary, getSafeSearchProviderTitle } from './helpers';
+import {
+    getRetentionSummary,
+    getSafeSearchProviderTitle,
+    buildQueryLogConfig,
+    buildStatsConfig,
+} from './helpers';
 
 import s from './Settings.module.pcss';
 
@@ -56,7 +61,7 @@ export const Settings = () => {
         const ss = safesearch();
         if (!ss) return '';
         const selected = Object.keys(SAFE_SEARCH_PROVIDERS)
-            .filter((key) => ss[key])
+            .filter((key) => (ss as Record<string, boolean>)[key])
             .map(getSafeSearchProviderTitle);
         return selected.join(', ');
     });
@@ -88,7 +93,7 @@ export const Settings = () => {
     };
 
     const handleLogsIgnoredSave = (ignored: string[]) => {
-        setLogsConfig({ ...queryLogsState, ignored }).then((result) => {
+        setLogsConfig(buildQueryLogConfig(queryLogsState, { ignored })).then((result) => {
             if (result) {
                 setLogsIgnoredModalOpen(false);
                 addSuccessToast(intl.getMessage('changes_saved_success'));
@@ -103,7 +108,7 @@ export const Settings = () => {
     };
 
     const handleStatsIgnoredSave = (ignored: string[]) => {
-        setStatsConfig({ ...statsState, ignored }).then((result) => {
+        setStatsConfig(buildStatsConfig(statsState, { ignored })).then((result) => {
             if (result) {
                 setStatsIgnoredModalOpen(false);
                 addSuccessToast(intl.getMessage('changes_saved_success'));
@@ -209,7 +214,9 @@ export const Settings = () => {
                             <SafeSearchModal
                                 open={safesearchProvidersOpen()}
                                 onClose={() => setSafesearchProvidersOpen(false)}
-                                providers={settingsState.settingsList.safesearch}
+                                providers={
+                                    settingsState.settingsList.safesearch as Record<string, boolean>
+                                }
                                 enabled={safesearchEnabled()}
                                 processing={safesearchProcessing()}
                                 onSave={handleSafeSearchSave}
@@ -229,10 +236,9 @@ export const Settings = () => {
                                     align="center"
                                     checked={queryLogsState.enabled}
                                     onChange={(v) =>
-                                        setLogsConfig({
-                                            ...queryLogsState,
-                                            enabled: v,
-                                        })
+                                        setLogsConfig(
+                                            buildQueryLogConfig(queryLogsState, { enabled: v }),
+                                        )
                                     }
                                     inputClass={s.queryLogSwitch}
                                 />
@@ -247,10 +253,11 @@ export const Settings = () => {
                                     checked={queryLogsState.anonymize_client_ip}
                                     disabled={!queryLogsState.enabled}
                                     onChange={(v) =>
-                                        setLogsConfig({
-                                            ...queryLogsState,
-                                            anonymize_client_ip: v,
-                                        })
+                                        setLogsConfig(
+                                            buildQueryLogConfig(queryLogsState, {
+                                                anonymize_client_ip: v,
+                                            }),
+                                        )
                                     }
                                 />
 
@@ -273,7 +280,11 @@ export const Settings = () => {
                                     divider
                                     disabled={!queryLogsState.enabled}
                                     onChange={(v) =>
-                                        setLogsConfig({ ...queryLogsState, ignored_enabled: v })
+                                        setLogsConfig(
+                                            buildQueryLogConfig(queryLogsState, {
+                                                ignored_enabled: v,
+                                            }),
+                                        )
                                     }
                                     onClick={() => setLogsIgnoredModalOpen(true)}
                                 />
@@ -332,7 +343,9 @@ export const Settings = () => {
                                         s.statsTitle,
                                     )}
                                     checked={statsState.enabled}
-                                    onChange={(v) => setStatsConfig({ ...statsState, enabled: v })}
+                                    onChange={(v) =>
+                                        setStatsConfig(buildStatsConfig(statsState, { enabled: v }))
+                                    }
                                 />
 
                                 <SettingRow
@@ -354,7 +367,9 @@ export const Settings = () => {
                                     divider
                                     disabled={!statsState.enabled}
                                     onChange={(v) =>
-                                        setStatsConfig({ ...statsState, ignored_enabled: v })
+                                        setStatsConfig(
+                                            buildStatsConfig(statsState, { ignored_enabled: v }),
+                                        )
                                     }
                                     onClick={() => setStatsIgnoredModalOpen(true)}
                                 />

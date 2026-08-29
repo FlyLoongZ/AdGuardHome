@@ -1,7 +1,13 @@
 import { createStore } from 'solid-js/store';
 import { untrack } from 'solid-js';
 
-import { apiClient } from 'panel/api/Api';
+import {
+    upstreamDnsSourcesAddURL,
+    upstreamDnsSourcesRefresh,
+    upstreamDnsSourcesRemoveURL,
+    upstreamDnsSourcesSetURL,
+    upstreamDnsSourcesStatus,
+} from 'panel/api/generated';
 import intl from 'panel/common/intl';
 
 import { addErrorToast, addSuccessToast } from './toasts';
@@ -62,7 +68,7 @@ const normalizeUpstreamDnsSources = (sources: any[] = []): UpstreamDnsSource[] =
 export const getUpstreamDnsSources = async () => {
     setState('processing', true);
     try {
-        const data = await apiClient.getUpstreamDnsSourcesStatus();
+        const data = await upstreamDnsSourcesStatus();
         setState({
             sources: normalizeUpstreamDnsSources(data?.sources || []),
             processing: false,
@@ -79,7 +85,7 @@ export const addUpstreamDnsSource = async (payload: {
 }): Promise<boolean> => {
     setState('processingAdd', true);
     try {
-        await apiClient.addUpstreamDnsSource(payload);
+        await upstreamDnsSourcesAddURL(payload);
         setState('processingAdd', false);
         addSuccessToast(intl.getMessage('upstream_dns_source_added_successfully'));
         await getUpstreamDnsSources();
@@ -94,7 +100,7 @@ export const addUpstreamDnsSource = async (payload: {
 export const removeUpstreamDnsSource = async (url: string): Promise<boolean> => {
     setState('processingRemove', true);
     try {
-        await apiClient.removeUpstreamDnsSource({ url });
+        await upstreamDnsSourcesRemoveURL({ url });
         setState('processingRemove', false);
         addSuccessToast(intl.getMessage('upstream_dns_source_removed_successfully'));
         await getUpstreamDnsSources();
@@ -116,7 +122,7 @@ export const setUpstreamDnsSource = async (
 ): Promise<boolean> => {
     setState('processingSet', true);
     try {
-        await apiClient.setUpstreamDnsSource({
+        await upstreamDnsSourcesSetURL({
             url: currentUrl,
             data: payload,
         });
@@ -142,7 +148,7 @@ export const toggleUpstreamDnsSource = async (source: UpstreamDnsSource) => {
 export const refreshUpstreamDnsSources = async () => {
     setState('processingRefresh', true);
     try {
-        const data = await apiClient.refreshUpstreamDnsSources();
+        const data = await upstreamDnsSourcesRefresh();
         setState('processingRefresh', false);
 
         const updated = data?.updated || 0;

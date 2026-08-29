@@ -7,6 +7,9 @@ import { EmptyState } from '../EmptyState';
 
 import s from './GeneralStatistics.module.pcss';
 import { StatRow } from '../StatRow';
+import { formatCompactNumber } from 'panel/helpers/helpers';
+import { RoutePath } from 'panel/components/Routes/Paths';
+import { QUERY_LOG_REASON_FILTER } from 'panel/helpers/constants';
 
 type Props = {
     numDnsQueries: number;
@@ -38,7 +41,9 @@ export const GeneralStatistics = (props: Props) => {
 
                 <Show when={hasStats()}>
                     <div class={cn(theme.text.t3, s.cardSubtitle)}>
-                        {intl.getPlural('queries_total', props.numDnsQueries)}
+                        {intl.getPlural('queries_total', props.numDnsQueries, {
+                            value: formatCompactNumber(props.numDnsQueries),
+                        })}
                     </div>
                 </Show>
             </div>
@@ -52,6 +57,7 @@ export const GeneralStatistics = (props: Props) => {
                         rowTheme="dnsQueries"
                         tooltip={intl.getMessage('dns_queries_tooltip')}
                         isTotal
+                        linkTo={RoutePath.QueryLog}
                     />
 
                     <StatRow
@@ -61,6 +67,8 @@ export const GeneralStatistics = (props: Props) => {
                         icon="adblocking"
                         rowTheme="adsBlocked"
                         tooltip={intl.getMessage('ads_blocked_tooltip')}
+                        linkTo={RoutePath.QueryLog}
+                        query={{ reason: QUERY_LOG_REASON_FILTER.BLOCKED_BY_FILTER.QUERY }}
                     />
 
                     <StatRow
@@ -70,6 +78,8 @@ export const GeneralStatistics = (props: Props) => {
                         icon="tracking"
                         rowTheme="threatsBlocked"
                         tooltip={intl.getMessage('threats_blocked_tooltip')}
+                        linkTo={RoutePath.QueryLog}
+                        query={{ reason: QUERY_LOG_REASON_FILTER.BLOCKED_BY_THREATS.QUERY }}
                     />
 
                     <StatRow
@@ -79,6 +89,10 @@ export const GeneralStatistics = (props: Props) => {
                         icon="parental"
                         rowTheme="adultWebsitesBlocked"
                         tooltip={intl.getMessage('adult_websites_blocked_tooltip')}
+                        linkTo={RoutePath.QueryLog}
+                        query={{
+                            reason: QUERY_LOG_REASON_FILTER.BLOCKED_BY_PARENTAL_CONTROL.QUERY,
+                        }}
                     />
 
                     <StatRow
@@ -88,6 +102,8 @@ export const GeneralStatistics = (props: Props) => {
                         icon="search"
                         rowTheme="safeSearchUsed"
                         tooltip={intl.getMessage('safe_search_used_tooltip')}
+                        linkTo={RoutePath.QueryLog}
+                        query={{ reason: QUERY_LOG_REASON_FILTER.SAFE_SEARCH.QUERY }}
                     />
 
                     <div class={s.rowDivider} />
@@ -99,7 +115,7 @@ export const GeneralStatistics = (props: Props) => {
                                 value: (props.avgProcessingTime ?? 0).toFixed(0),
                             })}
                             isQueriesValue={false}
-                            icon="time"
+                            icon="recent"
                             rowTheme="averageProcessingTime"
                             tooltip={intl.getMessage('average_time_processing_tooltip')}
                         />

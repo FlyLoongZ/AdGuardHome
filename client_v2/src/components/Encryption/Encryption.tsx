@@ -132,9 +132,9 @@ export const Encryption = () => {
             serve_plain_dns: encryptionState.serve_plain_dns,
             server_name: encryptionState.server_name,
             force_https: encryptionState.force_https,
-            port_https: encryptionState.port_https,
-            port_dns_over_tls: encryptionState.port_dns_over_tls,
-            port_dns_over_quic: encryptionState.port_dns_over_quic,
+            port_https: Number(encryptionState.port_https) || 0,
+            port_dns_over_tls: Number(encryptionState.port_dns_over_tls) || 0,
+            port_dns_over_quic: Number(encryptionState.port_dns_over_quic) || 0,
             certificate_chain: encryptionState.certificate_chain,
             private_key: encryptionState.private_key,
             certificate_path: encryptionState.certificate_path,
@@ -169,19 +169,19 @@ export const Encryption = () => {
             <div class={cn(theme.layout.containerIn, theme.layout.containerIn_one_col)}>
                 <div class={s.header}>
                     <h1 class={cn(theme.layout.title, theme.title.h4, theme.title.h3_tablet)}>
-                        {intl.getMessage('dns_protocols_title')}
+                        {intl.getMessage('protocols')}
                     </h1>
                     <Dropdown
-                        trigger="click"
                         position="bottomRight"
                         noIcon
                         open={menuOpen()}
                         onOpenChange={setMenuOpen}
                         menu={resetMenu}
+                        anchorClass={theme.dropdown.trigger_offset}
                     >
                         <button
                             type="button"
-                            class={s.menuButton}
+                            class={theme.dropdown.trigger}
                             aria-label={intl.getMessage('reset_dns_protocols')}
                         >
                             <Icon icon="bullets" />

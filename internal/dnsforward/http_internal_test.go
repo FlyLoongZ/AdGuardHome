@@ -93,7 +93,7 @@ func TestDNSForwardHTTP_handleGetConfig(t *testing.T) {
 		ConfModifier:  agh.EmptyConfigModifier{},
 		ServePlainDNS: true,
 	}
-	s := createTestServer(t, filterConf, forwardConf)
+	s := createTestServer(t, filterConf, forwardConf, testTLSManager)
 	s.sysResolvers = &emptySysResolvers{}
 
 	require.NoError(t, s.Start(testutil.ContextWithTimeout(t, testTimeout)))
@@ -194,7 +194,7 @@ func TestDNSForwardHTTP_handleSetConfig(t *testing.T) {
 		ConfModifier:  agh.EmptyConfigModifier{},
 		ServePlainDNS: true,
 	}
-	s := createTestServer(t, filterConf, forwardConf)
+	s := createTestServer(t, filterConf, forwardConf, testTLSManager)
 	s.sysResolvers = &emptySysResolvers{}
 
 	defaultConf := s.conf
@@ -432,6 +432,7 @@ func TestServer_HandleTestUpstreamDNS(t *testing.T) {
 			},
 			ServePlainDNS: true,
 		},
+		testTLSManager,
 	)
 	srv.etcHosts = upstream.NewHostsResolver(hc)
 	startDeferStop(t, srv)
@@ -554,7 +555,7 @@ func TestServer_UpstreamSourcesHTTP(t *testing.T) {
 		ServePlainDNS:  true,
 		UDPListenAddrs: []*net.UDPAddr{},
 		TCPListenAddrs: []*net.TCPAddr{},
-	})
+	}, testTLSManager)
 
 	reqBody := func(v any) io.ReadCloser {
 		b, e := json.Marshal(v)
@@ -732,7 +733,7 @@ func TestServer_HandleTestUpstreamDNS_WithSources(t *testing.T) {
 		ServePlainDNS:  true,
 		UDPListenAddrs: []*net.UDPAddr{},
 		TCPListenAddrs: []*net.TCPAddr{},
-	})
+	}, testTLSManager)
 
 	req := httptest.NewRequest(http.MethodPost, "/control/test_upstream_dns", io.NopCloser(bytes.NewReader([]byte(`{
 		"upstream_dns": ["114.114.114.114:53"],
@@ -788,7 +789,7 @@ func TestServer_HandleUpstreamDNSSources_RejectsUnsafeAndInvalidContent(t *testi
 		ServePlainDNS:  true,
 		UDPListenAddrs: []*net.UDPAddr{},
 		TCPListenAddrs: []*net.TCPAddr{},
-	})
+	}, testTLSManager)
 
 	reqBody := func(v any) io.ReadCloser {
 		b, e := json.Marshal(v)
@@ -863,7 +864,7 @@ func TestServer_HandleUpstreamDNSSources_RefreshPartialSuccess(t *testing.T) {
 		ServePlainDNS:  true,
 		UDPListenAddrs: []*net.UDPAddr{},
 		TCPListenAddrs: []*net.TCPAddr{},
-	})
+	}, testTLSManager)
 
 	sourcesBefore := srv.upstreamSources.all()
 	require.Len(t, sourcesBefore, 2)

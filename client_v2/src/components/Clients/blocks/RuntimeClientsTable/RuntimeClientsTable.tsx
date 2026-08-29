@@ -19,7 +19,9 @@ type Props = {
 
 export const RuntimeClientsTable = (props: Props) => {
     const pageSize = createMemo(
-        () => LocalStorageHelper.getItem(LOCAL_STORAGE_KEYS.AUTO_CLIENTS_PAGE_SIZE) || undefined,
+        () =>
+            LocalStorageHelper.getItem<number>(LOCAL_STORAGE_KEYS.AUTO_CLIENTS_PAGE_SIZE) ||
+            undefined,
     );
 
     const columns = createMemo<TableColumn<AutoClient>[]>(() => [
@@ -57,7 +59,7 @@ export const RuntimeClientsTable = (props: Props) => {
                     <span class={s.cellLabel}>{intl.getMessage('name_table_header')}</span>
 
                     <div class={s.cellValue}>
-                        <span class={theme.common.textOverflow} title={value || '-'}>
+                        <span class={theme.common.twoRowsOverflow} title={value || '-'}>
                             {value || '-'}
                         </span>
                     </div>

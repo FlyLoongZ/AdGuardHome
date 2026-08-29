@@ -22,9 +22,10 @@ type ToastProps = {
     undoId?: string;
     action?: ToastAction;
     code?: string;
+    noIcon?: boolean;
 };
 
-const Toast = (props: ToastProps) => {
+export const Toast = (props: ToastProps) => {
     let timerRef: ReturnType<typeof setTimeout> | null = null;
 
     const removeCurrentToast = () => removeToast(props.id);
@@ -88,10 +89,12 @@ const Toast = (props: ToastProps) => {
             onMouseOut={resetRemoveToastTimeout}
         >
             <div class={s.messageRow}>
-                <Icon
-                    icon={(props.type === 'success' ? 'check' : 'attention') as any}
-                    class={cn(s.icon, s[props.type])}
-                />
+                <Show when={!props.noIcon}>
+                    <Icon
+                        icon={props.type === 'success' ? 'check' : 'attention'}
+                        class={cn(s.icon, s[props.type])}
+                    />
+                </Show>
 
                 <div class={s.content}>{props.message}</div>
             </div>
@@ -115,5 +118,3 @@ const Toast = (props: ToastProps) => {
         </div>
     );
 };
-
-export default Toast;

@@ -19,6 +19,7 @@ import (
 
 	"github.com/AdguardTeam/AdGuardHome/internal/aghnet"
 	"github.com/AdguardTeam/AdGuardHome/internal/aghslog"
+	"github.com/AdguardTeam/AdGuardHome/internal/aghtls"
 	"github.com/AdguardTeam/AdGuardHome/internal/client"
 	"github.com/AdguardTeam/AdGuardHome/internal/filtering"
 	"github.com/AdguardTeam/AdGuardHome/internal/querylog"
@@ -124,6 +125,10 @@ type Server struct {
 	// PTR resolving.
 	sysResolvers SystemResolvers
 
+	// tlsManager provides TLS configuration for the server.  It must not
+	// be nil.
+	tlsManager aghtls.Manager
+
 	// access drops disallowed clients.
 	access *accessManager
 
@@ -169,10 +174,6 @@ type Server struct {
 	// [upstream.Resolver] interface.
 	bootResolvers []*upstream.UpstreamResolver
 
-	// dnsNames are the DNS names from certificate (SAN) or CN value from
-	// Subject.
-	dnsNames []string
-
 	// conf is the current configuration of the server.
 	conf ServerConfig
 
@@ -192,10 +193,6 @@ type Server struct {
 
 	// isRunning is true if the DNS server is running.
 	isRunning bool
-
-	// hasIPAddrs is set during the certificate parsing and is true if the
-	// configured certificate contains at least a single IP address.
-	hasIPAddrs bool
 }
 
 // defaultLocalDomainSuffix is the default suffix used to detect internal hosts
@@ -213,6 +210,10 @@ type DNSCreateParams struct {
 	PrivateNets netutil.SubnetSet
 	Anonymizer  *aghnet.IPMut
 	EtcHosts    *aghnet.HostsContainer
+
+	// TLSManager provides a TLS configuration for the server.  It must
+	// not be nil.
+	TLSManager aghtls.Manager
 
 	// Logger is used as a base logger.  It must not be nil.
 	Logger *slog.Logger
@@ -262,6 +263,7 @@ func NewServer(p DNSCreateParams) (s *Server, err error) {
 		conf: ServerConfig{
 			ServePlainDNS: true,
 		},
+		tlsManager: p.TLSManager,
 	}
 	s.upstreamSources = newSourceManager(&s.conf, s.logger, s.dnsFilter)
 
@@ -497,8 +499,9 @@ func (s *Server) startLocked(ctx context.Context) error {
 // proceeds further.
 var testPrepareHook func(s *Server) (err error)
 
-// Prepare initializes parameters of s using data from conf.  conf must not be
-// nil.
+// Prepare initializes parameters of s using data from conf.  It can be called
+// from outside of the package and without acquired s.serverLock only while the
+// initialization. conf must be non-nil and valid.
 func (s *Server) Prepare(ctx context.Context, conf *ServerConfig) (err error) {
 	s.conf = *conf
 	s.upstreamSources = newSourceManager(&s.conf, s.logger, s.dnsFilter)
@@ -594,7 +597,7 @@ func (s *Server) prepareUpstreamSettings(ctx context.Context, boot upstream.Reso
 		// See [aghtls.SystemRootCAs].
 		//
 		// TODO(a.garipov): Investigate if that's true.
-		RootCAs:      s.conf.TLSv12Roots,
+		RootCAs:      s.tlsManager.RootCAs(),
 		CipherSuites: s.conf.TLSCiphers,
 	})
 	if err != nil {
@@ -675,7 +678,7 @@ func (s *Server) prepareInternalDNS(ctx context.Context) (err error) {
 	}
 
 	ipsetLogger := s.baseLogger.With(slogutil.KeyPrefix, "ipset")
-	s.ipset, err = newIpsetHandler(context.TODO(), ipsetLogger, ipsetList)
+	s.ipset, err = newIpsetHandler(ctx, ipsetLogger, ipsetList)
 	if err != nil {
 		// Don't wrap the error, because it's informative enough as is.
 		return err

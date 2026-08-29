@@ -38,41 +38,10 @@
     color: var(--default-description-text);
 }
 
-.cellNameToggleOuter {
-    @media (max-width: 767px) {
-        width: 100% !important;
-        min-width: 100%;
-    }
-}
-
-.cellValueToggle {
-    width: auto;
-    flex-shrink: 0;
-}
-
-.cellNameLabel {
-    flex: 1;
-    min-width: 0;
-    text-align: left;
-    word-break: break-word;
-    overflow: hidden;
-
-    @media (min-width: 768px) {
-        display: none;
-    }
-}
-
-.nameDesktopOnly {
-    @media (max-width: 767px) {
-        display: none;
-    }
-}
-
 .errorText {
     color: var(--default-error-icon);
     font-size: 12px;
 }
-
 .tableRewrites {
     @media (min-width: 768px) {
         grid-template-columns: 3fr 5fr 80px;
@@ -81,9 +50,15 @@
 
 .domainCellValue {
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-start;
     flex: 1;
     white-space: normal;
+    gap: 8px;
+
+    & > span {
+        flex: 1;
+        min-width: 0;
+    }
 
     @media (min-width: 768px) {
         flex-direction: row-reverse;
@@ -91,6 +66,11 @@
         gap: 8px;
         flex: initial;
         white-space: nowrap;
+        align-items: center;
+
+        & > span {
+            flex: initial;
+        }
     }
 }
 

@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/AdguardTeam/AdGuardHome/internal/agh"
 	"github.com/AdguardTeam/AdGuardHome/internal/aghhttp"
 	"github.com/AdguardTeam/AdGuardHome/internal/aghtest"
 	"github.com/AdguardTeam/AdGuardHome/internal/aghtls"
@@ -63,21 +62,18 @@ func TestWeb_HandleGetProfile(t *testing.T) {
 
 	t.Cleanup(func() { auth.close(testutil.ContextWithTimeout(t, testTimeout)) })
 
-	tlsMgr, err := newTLSManager(testutil.ContextWithTimeout(t, testTimeout), &tlsManagerConfig{
-		logger:       testLogger,
-		confModifier: agh.EmptyConfigModifier{},
-		manager:      aghtls.EmptyManager{},
+	ctx := testutil.ContextWithTimeout(t, testTimeout)
+	m, err := aghtls.NewDefaultManager(ctx, &aghtls.DefaultManagerConfig{
+		Logger: testLogger,
 	})
 	require.NoError(t, err)
 
 	web := newTestWeb(t, &webConfig{
-		tlsManager: tlsMgr,
+		tlsManager: m,
 		auth:       auth,
 		mux:        baseMux,
 	})
 	require.NoError(t, err)
-
-	globalContext.web = web
 
 	mux := auth.middleware().Wrap(baseMux)
 
@@ -90,8 +86,7 @@ func TestWeb_HandleGetProfile(t *testing.T) {
 	}))
 
 	require.True(t, t.Run("add_user", func(t *testing.T) {
-		ctx := testutil.ContextWithTimeout(t, testTimeout)
-		err = auth.addUser(ctx, user, userPassword)
+		err = auth.addUser(testutil.ContextWithTimeout(t, testTimeout), user, userPassword)
 		require.NoError(t, err)
 
 		w := httptest.NewRecorder()
@@ -123,13 +118,19 @@ func TestWeb_HandlePutProfile(t *testing.T) {
 		OnApply: func(_ context.Context) { isConfigChanged = true },
 	}
 
+	ctx := testutil.ContextWithTimeout(t, testTimeout)
+	m, err := aghtls.NewDefaultManager(ctx, &aghtls.DefaultManagerConfig{
+		Logger: testLogger,
+	})
+	require.NoError(t, err)
+
 	web := newTestWeb(t, &webConfig{
 		mux:            mux,
 		configModifier: confModifier,
 		httpReg:        httpReg,
+		tlsManager:     m,
 	})
 
-	globalContext.web = web
 	mw.set(web)
 
 	var (

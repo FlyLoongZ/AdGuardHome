@@ -2,17 +2,15 @@ import { Show, For } from 'solid-js';
 import cn from 'clsx';
 
 import intl from 'panel/common/intl';
-import { Button } from 'panel/common/ui/Button';
 import { Dialog } from 'panel/common/ui/Dialog';
 import theme from 'panel/lib/theme';
 
 import {
-    checkBlockedService,
+    captitalizeWords,
     formatElapsedMs,
     getServiceName,
     type Filter,
 } from 'panel/helpers/helpers';
-import { FILTERED_STATUS } from 'panel/helpers/constants';
 import {
     getQueryReasonDetails,
     getQueryReasonLabel,
@@ -21,16 +19,18 @@ import {
     getQueryStatusKey,
     getStatusClassName,
     getProtocolName,
-    isBlockedReason,
     formatLogTimeDetailed,
     formatLogDate,
 } from '../../helpers';
-import { LogEntry, ResponseEntry, Service } from '../../types';
+import type { NormalizedQueryLogItem } from 'panel/helpers/helpers';
+import { Service } from '../../types';
+import type { RewriteEntry } from 'panel/api/model/rewriteEntry';
 
+import { ActionFooter } from './blocks';
 import s from './DetailModal.module.pcss';
 
 type Props = {
-    entry: LogEntry;
+    entry: NormalizedQueryLogItem;
     filters: Filter[];
     services: Service[];
     whitelistFilters: Filter[];
@@ -38,9 +38,15 @@ type Props = {
     onBlock: (domain: string) => void;
     onAddToAllowlist: (domain: string) => void;
     onAllowService: (serviceId: string) => void;
+    onDisableFilter: (filter: Filter) => void;
+    onDisableSafeBrowsing: () => void;
+    onDisableParental: () => void;
+    onDisableSafeSearch: () => void;
+    onRemoveRewrite: (rewrite: RewriteEntry) => void;
+    onEditRewrite: (rewrite: RewriteEntry) => void;
 };
 
-const formatResponses = (responses: ResponseEntry[] = []) =>
+const formatResponses = (responses: { value?: string; type?: string; ttl?: number }[] = []) =>
     responses
         .map(({ type, value, ttl }) => {
             if (!value) {
@@ -64,15 +70,6 @@ export const DetailModal = (props: Props) => {
     const statusKey = () =>
         getQueryStatusKey(props.entry.reason, props.entry.originalResponse ?? []);
     const reasonKey = () => getQueryReasonKey(props.entry.reason, props.entry.rules ?? []);
-    const isBlocked = () => isBlockedReason(props.entry.reason);
-    const isBlockedService = () => checkBlockedService(props.entry.reason);
-    const isSafeSearch = () => props.entry.reason === FILTERED_STATUS.FILTERED_SAFE_SEARCH;
-    const isRewrite = () =>
-        props.entry.reason === FILTERED_STATUS.REWRITE ||
-        props.entry.reason === FILTERED_STATUS.REWRITE_HOSTS ||
-        props.entry.reason === FILTERED_STATUS.REWRITE_RULE;
-    const showBlock = () => !isBlocked() && !isRewrite() && !isSafeSearch();
-    const showAllowlist = () => isBlocked() || isSafeSearch();
     const reasonDetails = () =>
         getQueryReasonDetails({
             elapsedMs: props.entry.elapsedMs,
@@ -89,6 +86,8 @@ export const DetailModal = (props: Props) => {
     const responseList = () => formatResponses(props.entry.response);
     const originalResponseList = () => formatResponses(props.entry.originalResponse);
     const trackerSource = () => props.entry.tracker?.sourceData;
+    const trackerName = () => props.entry.tracker?.name;
+    const trackerCategory = () => props.entry.tracker?.category;
     const country = () => props.entry.client_info?.whois?.country;
     const network = () => props.entry.client_info?.whois?.orgname;
     const serviceId = () => props.entry.serviceName || props.entry.service_name;
@@ -109,24 +108,6 @@ export const DetailModal = (props: Props) => {
             {content}
         </span>
     );
-
-    const handleBlock = () => {
-        props.onBlock(props.entry.domain);
-        props.onClose();
-    };
-
-    const handleAddToAllowlist = () => {
-        props.onAddToAllowlist(props.entry.domain);
-        props.onClose();
-    };
-
-    const handleAllowService = () => {
-        if (!serviceId()) {
-            return;
-        }
-        props.onAllowService(serviceId()!);
-        props.onClose();
-    };
 
     return (
         <Dialog
@@ -215,49 +196,63 @@ export const DetailModal = (props: Props) => {
                             <h3 class={cn(s.sectionTitle, theme.title.h6)}>
                                 {intl.getMessage('known_tracker')}
                             </h3>
-                            <div
-                                class={rowClassName()}
-                                data-testid="query-log-detail-tracker-name"
-                                data-field="tracker-name"
-                            >
-                                {intl.getMessage('query_log_detail_name', {
-                                    value: props.entry.tracker!.name,
-                                    span: renderValue,
-                                })}
-                            </div>
-                            <div
-                                class={rowClassName()}
-                                data-testid="query-log-detail-tracker-category"
-                                data-field="tracker-category"
-                            >
-                                {intl.getMessage('query_log_detail_category', {
-                                    value: props.entry.tracker!.category,
-                                    span: renderValue,
-                                })}
-                            </div>
-                            <Show when={trackerSource()?.name}>
-                                <div
-                                    class={rowClassName()}
-                                    data-testid="query-log-detail-tracker-source"
-                                    data-field="tracker-source"
-                                >
-                                    {intl.getMessage('query_log_detail_source', {
-                                        value: trackerSource()!.name,
-                                        span: (content: any) =>
-                                            trackerSource()!.url ? (
-                                                <a
-                                                    href={trackerSource()!.url}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    class={cn(s.link, s.value)}
-                                                >
-                                                    {content}
-                                                </a>
-                                            ) : (
-                                                renderValue(content)
-                                            ),
-                                    })}
-                                </div>
+                            <Show when={trackerName()}>
+                                {(name) => (
+                                    <div
+                                        class={rowClassName()}
+                                        data-testid="query-log-detail-tracker-name"
+                                        data-field="tracker-name"
+                                    >
+                                        {intl.getMessage('query_log_detail_name', {
+                                            value: name(),
+                                            span: renderValue,
+                                        })}
+                                    </div>
+                                )}
+                            </Show>
+                            <Show when={trackerCategory()}>
+                                {(category) => (
+                                    <div
+                                        class={rowClassName()}
+                                        data-testid="query-log-detail-tracker-category"
+                                        data-field="tracker-category"
+                                    >
+                                        {intl.getMessage('query_log_detail_category', {
+                                            value: captitalizeWords(category()),
+                                            span: renderValue,
+                                        })}
+                                    </div>
+                                )}
+                            </Show>
+                            <Show when={trackerSource()}>
+                                {(source) => (
+                                    <Show when={source()?.name}>
+                                        {(name) => (
+                                            <div
+                                                class={rowClassName()}
+                                                data-testid="query-log-detail-tracker-source"
+                                                data-field="tracker-source"
+                                            >
+                                                {intl.getMessage('query_log_detail_source', {
+                                                    value: name(),
+                                                    span: (content: any) =>
+                                                        source()?.url ? (
+                                                            <a
+                                                                href={source()?.url}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                class={cn(s.link, s.value)}
+                                                            >
+                                                                {content}
+                                                            </a>
+                                                        ) : (
+                                                            renderValue(content)
+                                                        ),
+                                                })}
+                                            </div>
+                                        )}
+                                    </Show>
+                                )}
                             </Show>
                         </div>
                     </Show>
@@ -460,63 +455,20 @@ export const DetailModal = (props: Props) => {
                     </div>
                 </div>
 
-                <div class={s.actionFooter} data-testid="query-log-detail-action-footer">
-                    <Show when={showBlock()}>
-                        <Button
-                            data-testid="query-log-detail-action-block"
-                            data-action="block"
-                            type="button"
-                            variant="danger"
-                            size="small"
-                            class={s.actionButton}
-                            onClick={handleBlock}
-                        >
-                            {intl.getMessage('block')}
-                        </Button>
-                    </Show>
-
-                    <Show when={showAllowlist()}>
-                        <Button
-                            data-testid="query-log-detail-action-allowlist"
-                            data-action="allowlist"
-                            type="button"
-                            variant="primary"
-                            size="small"
-                            class={s.actionButton}
-                            onClick={handleAddToAllowlist}
-                        >
-                            {intl.getMessage('add_to_allowlist')}
-                        </Button>
-                    </Show>
-
-                    <Show when={isBlockedService() && serviceId()}>
-                        <Button
-                            data-testid="query-log-detail-action-allow-service"
-                            data-action="allow-service"
-                            type="button"
-                            variant="secondary"
-                            size="small"
-                            class={s.actionButton}
-                            onClick={handleAllowService}
-                        >
-                            {intl.getMessage('allow_service')}
-                        </Button>
-                    </Show>
-
-                    <Show when={!showBlock() && !showAllowlist()}>
-                        <Button
-                            data-testid="query-log-detail-action-close"
-                            data-action="close"
-                            type="button"
-                            variant="primary"
-                            size="small"
-                            class={s.actionButton}
-                            onClick={props.onClose}
-                        >
-                            {intl.getMessage('close')}
-                        </Button>
-                    </Show>
-                </div>
+                <ActionFooter
+                    entry={props.entry}
+                    filters={props.filters}
+                    onClose={props.onClose}
+                    onBlock={props.onBlock}
+                    onAddToAllowlist={props.onAddToAllowlist}
+                    onAllowService={props.onAllowService}
+                    onDisableFilter={props.onDisableFilter}
+                    onDisableSafeBrowsing={props.onDisableSafeBrowsing}
+                    onDisableParental={props.onDisableParental}
+                    onDisableSafeSearch={props.onDisableSafeSearch}
+                    onRemoveRewrite={props.onRemoveRewrite}
+                    onEditRewrite={props.onEditRewrite}
+                />
             </div>
         </Dialog>
     );
