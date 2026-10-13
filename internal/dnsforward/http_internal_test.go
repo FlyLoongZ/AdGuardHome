@@ -22,6 +22,7 @@ import (
 	"github.com/AdguardTeam/AdGuardHome/internal/aghnet"
 	"github.com/AdguardTeam/AdGuardHome/internal/aghtest"
 	"github.com/AdguardTeam/AdGuardHome/internal/filtering"
+	"github.com/AdguardTeam/dnsproxy/proxy"
 	"github.com/AdguardTeam/dnsproxy/upstream"
 	"github.com/AdguardTeam/golibs/httphdr"
 	"github.com/AdguardTeam/golibs/netutil"
@@ -78,20 +79,18 @@ func TestDNSForwardHTTP_handleGetConfig(t *testing.T) {
 		CacheTime:             30,
 	}
 	forwardConf := ServerConfig{
-		UDPListenAddrs: []*net.UDPAddr{},
-		TCPListenAddrs: []*net.TCPAddr{},
-		TLSConf:        &TLSConfig{},
-		Config: Config{
-			UpstreamDNS:            []string{"114.114.114.114:53", "223.5.5.5:53"},
-			FallbackDNS:            []string{"9.9.9.10"},
-			RatelimitSubnetLenIPv4: 24,
-			RatelimitSubnetLenIPv6: 56,
-			UpstreamMode:           UpstreamModeLoadBalance,
-			EDNSClientSubnet:       &EDNSClientSubnet{Enabled: false},
-			ClientsContainer:       EmptyClientsContainer{},
-		},
-		ConfModifier:  agh.EmptyConfigModifier{},
-		ServePlainDNS: true,
+		UDPListenAddrs:         []*net.UDPAddr{},
+		TCPListenAddrs:         []*net.TCPAddr{},
+		TLSConf:                &TLSConfig{},
+		UpstreamDNS:            []string{"114.114.114.114:53", "223.5.5.5:53"},
+		FallbackDNS:            []string{"9.9.9.10"},
+		RatelimitSubnetLenIPv4: 24,
+		RatelimitSubnetLenIPv6: 56,
+		UpstreamMode:           proxy.UpstreamModeLoadBalance,
+		EDNSClientSubnet:       &EDNSClientSubnet{Enabled: false},
+		ClientsContainer:       EmptyClientsContainer{},
+		ConfModifier:           agh.EmptyConfigModifier{},
+		ServePlainDNS:          true,
 	}
 	s := createTestServer(t, filterConf, forwardConf, testTLSManager)
 	s.sysResolvers = &emptySysResolvers{}
@@ -116,7 +115,7 @@ func TestDNSForwardHTTP_handleGetConfig(t *testing.T) {
 	}, {
 		conf: func() ServerConfig {
 			conf := defaultConf
-			conf.UpstreamMode = UpstreamModeFastestAddr
+			conf.UpstreamMode = proxy.UpstreamModeFastestAddr
 
 			return conf
 		},
@@ -124,7 +123,7 @@ func TestDNSForwardHTTP_handleGetConfig(t *testing.T) {
 	}, {
 		conf: func() ServerConfig {
 			conf := defaultConf
-			conf.UpstreamMode = UpstreamModeParallel
+			conf.UpstreamMode = proxy.UpstreamModeParallel
 
 			return conf
 		},
@@ -180,19 +179,17 @@ func TestDNSForwardHTTP_handleSetConfig(t *testing.T) {
 		CacheTime:             30,
 	}
 	forwardConf := ServerConfig{
-		UDPListenAddrs: []*net.UDPAddr{},
-		TCPListenAddrs: []*net.TCPAddr{},
-		TLSConf:        &TLSConfig{},
-		Config: Config{
-			UpstreamDNS:            []string{"114.114.114.114:53", "223.5.5.5:53"},
-			RatelimitSubnetLenIPv4: 24,
-			RatelimitSubnetLenIPv6: 56,
-			UpstreamMode:           UpstreamModeLoadBalance,
-			EDNSClientSubnet:       &EDNSClientSubnet{Enabled: false},
-			ClientsContainer:       EmptyClientsContainer{},
-		},
-		ConfModifier:  agh.EmptyConfigModifier{},
-		ServePlainDNS: true,
+		UDPListenAddrs:         []*net.UDPAddr{},
+		TCPListenAddrs:         []*net.TCPAddr{},
+		TLSConf:                &TLSConfig{},
+		UpstreamDNS:            []string{"114.114.114.114:53", "223.5.5.5:53"},
+		RatelimitSubnetLenIPv4: 24,
+		RatelimitSubnetLenIPv6: 56,
+		UpstreamMode:           proxy.UpstreamModeLoadBalance,
+		EDNSClientSubnet:       &EDNSClientSubnet{Enabled: false},
+		ClientsContainer:       EmptyClientsContainer{},
+		ConfModifier:           agh.EmptyConfigModifier{},
+		ServePlainDNS:          true,
 	}
 	s := createTestServer(t, filterConf, forwardConf, testTLSManager)
 	s.sysResolvers = &emptySysResolvers{}
@@ -421,16 +418,14 @@ func TestServer_HandleTestUpstreamDNS(t *testing.T) {
 			EtcHosts:     hc,
 		},
 		ServerConfig{
-			UDPListenAddrs:  []*net.UDPAddr{{}},
-			TCPListenAddrs:  []*net.TCPAddr{{}},
-			UpstreamTimeout: upsTimeout,
-			TLSConf:         &TLSConfig{},
-			Config: Config{
-				UpstreamMode:     UpstreamModeLoadBalance,
-				EDNSClientSubnet: &EDNSClientSubnet{Enabled: false},
-				ClientsContainer: EmptyClientsContainer{},
-			},
-			ServePlainDNS: true,
+			UDPListenAddrs:   []*net.UDPAddr{{}},
+			TCPListenAddrs:   []*net.TCPAddr{{}},
+			UpstreamTimeout:  upsTimeout,
+			TLSConf:          &TLSConfig{},
+			UpstreamMode:     proxy.UpstreamModeLoadBalance,
+			EDNSClientSubnet: &EDNSClientSubnet{Enabled: false},
+			ClientsContainer: EmptyClientsContainer{},
+			ServePlainDNS:    true,
 		},
 		testTLSManager,
 	)
@@ -546,7 +541,7 @@ func TestServer_UpstreamSourcesHTTP(t *testing.T) {
 	}, ServerConfig{
 		Config: Config{
 			UpstreamDNS:      []string{"114.114.114.114:53"},
-			UpstreamMode:     UpstreamModeLoadBalance,
+			UpstreamMode:     proxy.UpstreamModeLoadBalance,
 			EDNSClientSubnet: &EDNSClientSubnet{},
 			ClientsContainer: EmptyClientsContainer{},
 		},
@@ -717,7 +712,7 @@ func TestServer_HandleTestUpstreamDNS_WithSources(t *testing.T) {
 	}, ServerConfig{
 		Config: Config{
 			UpstreamDNS:  []string{"114.114.114.114:53"},
-			UpstreamMode: UpstreamModeLoadBalance,
+			UpstreamMode: proxy.UpstreamModeLoadBalance,
 			UpstreamDNSSources: []UpstreamDNSSourceYAML{{
 				Enabled: true,
 				URL:     "https://example.test/source.txt",
@@ -780,7 +775,7 @@ func TestServer_HandleUpstreamDNSSources_RejectsUnsafeAndInvalidContent(t *testi
 	}, ServerConfig{
 		Config: Config{
 			UpstreamDNS:      []string{"114.114.114.114:53"},
-			UpstreamMode:     UpstreamModeLoadBalance,
+			UpstreamMode:     proxy.UpstreamModeLoadBalance,
 			EDNSClientSubnet: &EDNSClientSubnet{},
 			ClientsContainer: EmptyClientsContainer{},
 		},
@@ -844,7 +839,7 @@ func TestServer_HandleUpstreamDNSSources_RefreshPartialSuccess(t *testing.T) {
 	}, ServerConfig{
 		Config: Config{
 			UpstreamDNS:  []string{"114.114.114.114:53"},
-			UpstreamMode: UpstreamModeLoadBalance,
+			UpstreamMode: proxy.UpstreamModeLoadBalance,
 			UpstreamDNSSources: []UpstreamDNSSourceYAML{{
 				Enabled:           true,
 				URL:               goodSrcPath,
