@@ -18,11 +18,17 @@ See also the [v0.107.80 GitHub milestone][ms-v0.107.80].
 NOTE: Add new changes BELOW THIS COMMENT.
 -->
 
-### Security
+### Changed
 
-- Go version has been updated to prevent the possibility of exploiting the Go vulnerabilities fixed in [1.27.1][go-1.27.1].
+- Client settings in the new web interface: *Use global settings* now applies to Protection only, blocked services have a separate *Use global blocked services* switch, and upstream DNS servers and the DNS cache are always editable.
 
 ### Fixed
+
+- Invalid SVCB record from DDR when DoH routes are empty.
+
+- Schedule shift on clock change cases ([#8670]).
+
+- Incorrect behaviour on the first launch with the `--check-config` flag.
 
 - Reading partially received TCP prefix.
 
@@ -46,10 +52,23 @@ NOTE: Add new changes BELOW THIS COMMENT.
 
 - Invalid secondary bootstrap resolver IPv4 address ([#8637]).
 
-### Removed
+- The *Server addresses* dialog overflowing horizontally when a long value is entered. Long unbreakable values in the settings rows overflowing the page.
 
-- The support for macOS 13 Ventura, see [Go 1.27 release notes][go-1.27.1-notes].
+- Encrypted DNS server addresses not appearing in the Setup Guide until the page was reloaded after enabling encryption.
 
+- Passwords containing emoji being rejected by the first-run setup wizard in the new web interface.
+
+- Cache size and TTL override rows being locked while the DNS cache was disabled in the new web interface ([#8644]).
+
+- Tables staying on an empty page after the last row of that page was deleted in the new web interface ([#8644]).
+
+- The *Log out* button opening the login page in a new tab in the new web interface ([#8661]).
+
+- Per-client blocked services schedules being reset when a client was saved in the new web interface ([#8638]).
+
+- Client sub-pages of the new web interface showing the default values instead of the client's settings when opened directly or reloaded.
+
+[#8670]:           https://github.com/AdguardTeam/AdGuardHome/issues/8670
 [#8565]:           https://github.com/AdguardTeam/AdGuardHome/issues/8565
 [#8572]:           https://github.com/AdguardTeam/AdGuardHome/issues/8572
 [#8608]:           https://github.com/AdguardTeam/AdGuardHome/issues/8608
@@ -58,12 +77,32 @@ NOTE: Add new changes BELOW THIS COMMENT.
 [#8613]:           https://github.com/AdguardTeam/AdGuardHome/issues/8613
 [#8636]:           https://github.com/AdguardTeam/AdGuardHome/issues/8636
 [#8637]:           https://github.com/AdguardTeam/AdGuardHome/issues/8637
-[go-1.27.1]:       https://groups.google.com/g/golang-announce/c/QiTRm-HGGtI
-[go-1.27.1-notes]: https://go.dev/doc/go1.27#darwin
+[#8638]:           https://github.com/AdguardTeam/AdGuardHome/issues/8638
+[#8644]:           https://github.com/AdguardTeam/AdGuardHome/issues/8644
+[#8661]:           https://github.com/AdguardTeam/AdGuardHome/issues/8661
 
 <!--
 NOTE: Add new changes ABOVE THIS COMMENT.
 -->
+
+## [v0.107.80] - 2026-11-03
+
+See also the [v0.107.80 GitHub milestone][ms-v0.107.80].
+
+### Security
+
+- Go version has been updated to mitigate the possibility of exploiting the Go vulnerabilities fixed in [1.27.3][go-1.27.3].
+
+- Support for Multipath TCP has been disabled to mitigate the possibility of exploiting the vulnerability described in [CVE-2026-98432][cve-2026-98432].
+
+### Removed
+
+- The support for macOS 13 Ventura, see [Go 1.27 release notes][go-1.27-notes].
+
+[cve-2026-98432]: https://nvd.nist.gov/vuln/detail/CVE-2026-98432
+[go-1.27-notes]:  https://go.dev/doc/go1.27#darwin
+[go-1.27.3]:      https://groups.google.com/g/golang-announce/c/66pojueaQek
+[ms-v0.107.80]:   https://github.com/AdguardTeam/AdGuardHome/milestone/115?closed=1
 
 ## [v0.107.79] - 2026-08-18
 
@@ -3781,11 +3820,12 @@ See also the [v0.104.2 GitHub milestone][ms-v0.104.2].
 [ms-v0.104.2]: https://github.com/AdguardTeam/AdGuardHome/milestone/28?closed=1
 
 <!--
-[Unreleased]: https://github.com/AdguardTeam/AdGuardHome/compare/v0.107.80...HEAD
-[v0.107.80]:  https://github.com/AdguardTeam/AdGuardHome/compare/v0.107.79...v0.107.80
+[Unreleased]: https://github.com/AdguardTeam/AdGuardHome/compare/v0.107.81...HEAD
+[v0.107.81]:  https://github.com/AdguardTeam/AdGuardHome/compare/v0.107.80...v0.107.81
 -->
 
-[Unreleased]: https://github.com/AdguardTeam/AdGuardHome/compare/v0.107.79...HEAD
+[Unreleased]: https://github.com/AdguardTeam/AdGuardHome/compare/v0.107.80...HEAD
+[v0.107.80]:  https://github.com/AdguardTeam/AdGuardHome/compare/v0.107.79...v0.107.80
 [v0.107.79]:  https://github.com/AdguardTeam/AdGuardHome/compare/v0.107.78...v0.107.79
 [v0.107.78]:  https://github.com/AdguardTeam/AdGuardHome/compare/v0.107.77...v0.107.78
 [v0.107.77]:  https://github.com/AdguardTeam/AdGuardHome/compare/v0.107.76...v0.107.77
